@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_fav_label">Favoriler</string>
+    <string name="widget_fav_description">Yıldızladığın coinler: fiyat, değişim ve 7 günlük çizgi, her biri tek satır</string>
+    <string name="widget_coin_label">Coin</string>
+    <string name="widget_coin_description">Tek coin: fiyat, değişim ve 7 günlük çizgisi</string>
+    <string name="widget_pf_label">Portföy</string>
+    <string name="widget_pf_description">Portföy değeri, bugünkü değişim ve kâr/zarar</string>
+    <string name="notif_channel_alerts">Alarmlar</string>
+    <string name="notif_channel_alerts_desc">Fiyat ve portföy alarm kuralların</string>
+    <string name="widget_grid_label">Kutular</string>
+    <string name="widget_grid_description">Yıldızlı coinlerin kutu kutu: fiyat ve değişim, 16\'ya kadar</string>
+    <string name="widget_movers_label">En çok hareket edenler</string>
+    <string name="widget_movers_description">İzleme listende en çok yükselen ve düşenler</string>
+    <string name="widget_hold_label">Varlıklarım</string>
+    <string name="widget_hold_description">Her varlık: portföydeki payı, değeri ve kâr/zararı</string>
+    <string name="widget_plan_label">Alım planı</string>
+    <string name="widget_plan_description">Sıradaki planlı alımın, ne zaman olduğu ve ilerleme</string>
+</resources>

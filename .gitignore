@@ -1,0 +1,35 @@
+# Gradle / Kotlin
+build/
+.gradle/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+local.properties
+
+# Android Studio
+*.iml
+.idea/
+captures/
+*.hprof
+
+# build outputs
+dist/
+*.apk
+*.aab
+*.apk.sha256
+
+# Signing material — never commit
+*.keystore
+*.jks
+/keystore/
+/keystore.properties
+
+# editors / OS
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# local tooling
+.claude/
+*.log

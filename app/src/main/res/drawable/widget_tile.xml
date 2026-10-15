@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tile inside the grid widget: one step up from the black card, opaque. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF0C0C0F" />
+    <stroke android:width="1dp" android:color="#FF18181C" />
+    <corners android:radius="12dp" />
+</shape>

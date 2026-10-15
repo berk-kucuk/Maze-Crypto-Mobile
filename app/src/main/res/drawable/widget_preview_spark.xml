@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sample 7-day line for the widget picker previews. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="24dp" android:viewportWidth="120" android:viewportHeight="24">
+    <path android:strokeColor="#FF34D399" android:strokeWidth="1.4" android:strokeLineJoin="round"
+        android:pathData="M0,16 L8,15 L14,18 L22,12 L30,13 L38,9 L46,11 L54,8 L62,10 L70,6 L78,9 L86,7 L94,4 L102,7 L110,5 L120,3" />
+</vector>

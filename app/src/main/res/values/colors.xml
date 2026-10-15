@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Maze OLED palette (desktop ui/theme.py). Green and red only ever mean up and down. -->
+    <color name="bg">#000000</color>
+    <color name="accent">#E9D8B4</color>
+    <color name="w_text">#EDEDF0</color>
+    <color name="w_mid">#A1A1AA</color>
+    <color name="w_dim">#71717A</color>
+    <color name="w_up">#34D399</color>
+    <color name="w_down">#F87171</color>
+    <color name="w_warn">#FB923C</color>
+    <color name="w_accent">#E9D8B4</color>
+</resources>

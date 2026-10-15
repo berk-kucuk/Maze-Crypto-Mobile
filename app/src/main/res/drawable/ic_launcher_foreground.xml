@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Maze Crypto mark, from the desktop's assets/maze-crypto.svg: the open maze
+     frame of the Maze family and three rising candles, the last one lit in
+     champagne and leaving through the gap. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="1536" android:viewportHeight="1536">
+    <group android:translateX="256" android:translateY="256">
+        <path android:pathData="M434,414 a230,230 0 1,0 460,0 a230,230 0 1,0 -460,0">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="664" android:centerY="414" android:gradientRadius="230">
+                    <item android:offset="0" android:color="#5CE9D8B4" />
+                    <item android:offset="0.45" android:color="#1AE9D8B4" />
+                    <item android:offset="1" android:color="#00E9D8B4" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M812,300 V212 H212 V812 H812 V530" android:strokeColor="#FFF2F2F4"
+            android:strokeWidth="50" android:strokeLineCap="butt" android:strokeLineJoin="miter" />
+        <path android:fillColor="#FFF2F2F4" android:pathData="M353,548h14v196h-14z M328,584h64v120h-64z" />
+        <path android:fillColor="#FFF2F2F4" android:pathData="M505,420h14v236h-14z M480,466h64v148h-64z" />
+        <path android:pathData="M657,290h14v252h-14z M632,326h64v176h-64z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="0" android:startY="290" android:endX="0" android:endY="542">
+                    <item android:offset="0" android:color="#FFFBF3E2" />
+                    <item android:offset="1" android:color="#FFD9C08E" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>

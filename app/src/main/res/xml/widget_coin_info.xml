@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Placed at 2x1; the sizes follow Android's rule for n cells, 70 x n - 30 dp.
+  The widget adapts to whatever it is then given — rotated, resized, or on a
+  grid with taller cells — by picking among layouts measured for each range
+  (WidgetLayouts.kt). That is why it can shrink to one row or two columns.
+
+  updatePeriodMillis is 0: the app's own refresh job redraws it (every 15
+  minutes by default, Settings → Widgets), plus a tap on its refresh icon.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedAttribute"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="100dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_coin_small"
+    android:previewLayout="@layout/widget_preview_coin_small"
+    android:description="@string/widget_coin_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:configure="com.mazecrypto.app.widget.CoinWidgetConfigureActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional" />

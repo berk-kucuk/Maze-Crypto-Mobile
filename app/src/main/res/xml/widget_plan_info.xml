@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placed at 2x1 (70 x n - 30 dp per n cells); adapts to any size it is
+     resized to by picking among measured layouts (Widgets.kt). Redrawn by the
+     app's refresh job, never on a platform timer (updatePeriodMillis 0). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedAttribute"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="100dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_plan"
+    android:previewLayout="@layout/widget_preview_plan"
+    android:description="@string/widget_plan_description"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

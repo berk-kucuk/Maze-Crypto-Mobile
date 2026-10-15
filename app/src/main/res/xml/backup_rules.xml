@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Trades and settings may go into the user's own device backup. The network
+     cache is never backed up by Android; the widget snapshot is rebuilt on the
+     first refresh, so it stays out too. -->
+<full-backup-content>
+    <exclude domain="file" path="widget.json" />
+</full-backup-content>

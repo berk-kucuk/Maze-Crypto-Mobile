@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Maze Crypto</string>
+    <!-- Shown in the launcher's widget picker. In-app text comes from assets/i18n. -->
+    <string name="widget_fav_label">Favorites</string>
+    <string name="widget_fav_description">Your starred coins: price, change and a 7-day line, one row each</string>
+    <string name="widget_coin_label">Coin</string>
+    <string name="widget_coin_description">One coin: price, change and its 7-day line</string>
+    <string name="widget_pf_label">Portfolio</string>
+    <string name="widget_pf_description">Portfolio value, today\'s change and profit/loss</string>
+    <string name="notif_channel_alerts">Alerts</string>
+    <string name="notif_channel_alerts_desc">Your price and portfolio alert rules</string>
+    <string name="widget_grid_label">Tiles</string>
+    <string name="widget_grid_description">Your starred coins as tiles: price and change, up to 16</string>
+    <string name="widget_movers_label">Top movers</string>
+    <string name="widget_movers_description">Your watchlist\'s biggest risers and fallers</string>
+    <string name="widget_hold_label">Holdings</string>
+    <string name="widget_hold_description">Each holding: share of the portfolio, value and profit/loss</string>
+    <string name="widget_plan_label">Buying plan</string>
+    <string name="widget_plan_description">Your next planned purchase, when it is due and progress</string>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar mark: the launcher icon's frame and candles, white only. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <path android:pathData="M812,300 V212 H212 V812 H812 V530" android:strokeColor="#FFFFFFFF" android:strokeWidth="64" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M349,548h22v196h-22z M328,584h64v120h-64z M501,420h22v236h-22z M480,466h64v148h-64z M653,290h22v252h-22z M632,326h64v176h-64z" />
+</vector>

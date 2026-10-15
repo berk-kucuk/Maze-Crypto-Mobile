@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A sample weight bar for the holdings widget preview. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="14dp" android:viewportWidth="100" android:viewportHeight="14">
+    <path android:fillColor="#FF1C1C21" android:pathData="M0,5 L100,5 L100,9 L0,9 Z" />
+    <path android:fillColor="#FFE9D8B4" android:pathData="M0,5 L50,5 L50,9 L0,9 Z" />
+</vector>

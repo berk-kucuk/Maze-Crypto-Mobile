@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MazeCrypto" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:colorAccent">@color/accent</item>
+    </style>
+
+    <!-- Home-screen widgets. Font padding off so the measured sizes in
+         tools/gen_widget_layouts.py hold. Numbers use tabular figures so a
+         changing price does not jitter. -->
+    <style name="WidgetText">
+        <item name="android:textColor">@color/w_text</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="WidgetText.Sym">
+        <item name="android:textSize">13sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+    <style name="WidgetText.Sym.Small">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textColor">@color/w_mid</item>
+    </style>
+    <style name="WidgetText.Sym.Large">
+        <item name="android:textSize">15sp</item>
+    </style>
+    <style name="WidgetText.Price">
+        <item name="android:textSize">13sp</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+    <style name="WidgetText.Price.Small">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/w_mid</item>
+    </style>
+    <style name="WidgetText.Price.Large">
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+    <style name="WidgetText.Change">
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:textColor">@color/w_mid</item>
+    </style>
+    <style name="WidgetText.Change.Small">
+        <item name="android:textSize">11sp</item>
+    </style>
+    <style name="WidgetText.Change.Tiny">
+        <item name="android:textSize">10sp</item>
+    </style>
+    <style name="WidgetText.Big">
+        <item name="android:textSize">17sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+    <style name="WidgetText.Huge">
+        <item name="android:textSize">22sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+    <style name="WidgetText.Title">
+        <item name="android:textSize">11sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/w_mid</item>
+    </style>
+    <style name="WidgetText.Dim">
+        <item name="android:textSize">10sp</item>
+        <item name="android:textColor">@color/w_dim</item>
+    </style>
+    <style name="WidgetText.Hint">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/w_mid</item>
+        <item name="android:maxLines">3</item>
+    </style>
+</resources>
