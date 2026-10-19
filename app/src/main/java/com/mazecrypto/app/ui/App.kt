@@ -81,6 +81,8 @@ sealed interface Route {
     data object Targets : Route
     data object DcaEdit : Route
     data class RuleEdit(val id: String? = null) : Route
+    data class WalletDetail(val id: String) : Route
+    data class WalletEdit(val id: String? = null, val coinId: String? = null) : Route
 }
 
 /** A plain back stack; the bottom-bar tabs reset it. */
@@ -113,7 +115,7 @@ class Nav(start: Route = Route.Home) {
     fun action(a: String) {
         when {
             a == "watchlist" -> go(Route.Prices(search = true))
-            a == "holdings:add" -> go(Route.Trade())
+            a == "holdings:add" -> go(Route.WalletEdit())
             a == "holdings:targets" -> go(Route.Targets)
             a == "holdings:alloc" -> tab(Route.Portfolio("alloc"))
             a == "holdings:trades" -> tab(Route.Portfolio("trades"))
@@ -128,7 +130,10 @@ class Nav(start: Route = Route.Home) {
         uri ?: return
         if (uri.scheme != "mazecrypto") return
         when (uri.host) {
-            "coin" -> uri.lastPathSegment?.let { tab(Route.Home); go(Route.Chart(it)) }
+            "coin" -> uri.lastPathSegment?.let {
+                // Tokens priced only by a chain indexer have no chart: show them where they are held.
+                if (com.mazecrypto.app.core.isSyntheticCoin(it)) tab(Route.Portfolio("wallets")) else { tab(Route.Home); go(Route.Chart(it)) }
+            }
             "portfolio" -> tab(Route.Portfolio())
             "alerts" -> tab(Route.Alerts)
             "plan" -> tab(Route.Plan)
@@ -197,6 +202,8 @@ private fun Screen(r: Route, nav: Nav) {
         Route.Targets -> TargetsEditor(nav)
         Route.DcaEdit -> DcaEditor(nav)
         is Route.RuleEdit -> RuleEditor(nav, r.id)
+        is Route.WalletDetail -> com.mazecrypto.app.ui.screens.WalletDetailScreen(nav, r.id)
+        is Route.WalletEdit -> com.mazecrypto.app.ui.screens.WalletEditor(nav, r.id, r.coinId)
     }
 }
 

@@ -5,8 +5,10 @@
   grid with taller cells — by picking among layouts measured for each range
   (WidgetLayouts.kt). That is why it can shrink to one row or two columns.
 
-  updatePeriodMillis is 0: the app's own refresh job redraws it (every 15
-  minutes by default, Settings → Widgets), plus a tap on its refresh icon.
+  The app's own refresh job redraws it (every 15 minutes by default,
+  Settings → Widgets), plus a tap on its refresh icon. updatePeriodMillis
+  (30 minutes, the platform minimum) is a fallback: launchers deliver it even
+  when the system or the phone maker holds the app's background jobs back.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
@@ -17,7 +19,7 @@
     android:minResizeHeight="40dp"
     android:targetCellWidth="2"
     android:targetCellHeight="1"
-    android:updatePeriodMillis="0"
+    android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_coin_small"
     android:previewLayout="@layout/widget_preview_coin_small"
     android:description="@string/widget_coin_description"

@@ -186,7 +186,7 @@ data class WidgetData(
                         hi, lo, c.isStable, downsample(r?.spark ?: emptyList()))
                 }
             }
-            val portfolio = if (snap == null) previous?.portfolio else if (profile.trades.isEmpty() || sum.holdings.isEmpty()) null else {
+            val portfolio = if (snap == null) previous?.portfolio else if (sum.holdings.isEmpty()) null else {
                 val day = valueChange24h(sum, snap.rows.associate { it.coin.id to it.change24h })
                 WPortfolio(
                     sum.valueFiat, sum.costFiat, sum.pnlFiat, sum.pnlPct, day?.first, day?.second,

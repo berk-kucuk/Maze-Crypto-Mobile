@@ -41,6 +41,8 @@ class AdvisorInput(
     val watchlist: List<String> = emptyList(),
     val summary: Summary? = null,
     val trades: Int = 0,
+    /** Watched addresses: a portfolio built from wallets needs no trades to be "started". */
+    val wallets: Int = 0,
     val tradesWithoutRate: Int = 0,
     val targets: Map<String, Double> = emptyMap(),
     val names: Map<String, String> = emptyMap(),
@@ -86,18 +88,19 @@ fun tips(x: AdvisorInput, f: TipFormatter = TipFormatter()): List<Tip> {
         out += Tip("start.watch", "action", "tip.start_watch.t", "tip.start_watch.b", action = "watchlist",
             actionLabel = "tip.btn.add_coin", priority = 10)
     }
-    if (x.trades == 0) {
+    val hasHoldings = x.trades > 0 || x.wallets > 0
+    if (x.trades == 0 && x.wallets == 0) {
         out += Tip("start.trades", "action", "tip.start_trades.t", "tip.start_trades.b", action = "holdings:add",
             actionLabel = "tip.btn.add_trade", priority = 12)
     } else if (x.targets.isEmpty()) {
         out += Tip("start.targets", "info", "tip.start_targets.t", "tip.start_targets.b", action = "holdings:targets",
             actionLabel = "tip.btn.set_targets", priority = 30)
     }
-    if (x.trades > 0 && !x.planExists) {
+    if (hasHoldings && !x.planExists) {
         out += Tip("start.plan", "info", "tip.start_plan.t", "tip.start_plan.b", action = "dca",
             actionLabel = "tip.btn.make_plan", priority = 60)
     }
-    if (x.trades > 0 && x.rules == 0) {
+    if (hasHoldings && x.rules == 0) {
         out += Tip("start.rules", "info", "tip.start_rules.t", "tip.start_rules.b", action = "rules",
             actionLabel = "tip.btn.add_alert", priority = 65)
     }

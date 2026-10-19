@@ -218,6 +218,8 @@ fun ChartScreen(nav: Nav, coinId: String) {
             }
         }
 
+        CoinWallets(nav, coinId, settings.fiat)
+
         // ── what the chart says, in sentences ─────────────────────────────
         if (d != null && d.candles.size > 2) {
             SectionTitle(t("chart.x.title"))

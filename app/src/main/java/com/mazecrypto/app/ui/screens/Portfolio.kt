@@ -70,8 +70,10 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
     var pendingImport by remember { mutableStateOf<List<com.mazecrypto.app.core.Trade>?>(null) }
     var exportText by remember { mutableStateOf("") }
     var yearPick by remember { mutableStateOf(false) }
+    var addMenu by remember { mutableStateOf(false) }
     val fiat = settings.fiat
-    val sum = remember(snap, profile, fiat) { Maze.summary() }
+    val walletData by Maze.walletData.collectAsStateWithLifecycle()
+    val sum = remember(snap, profile, fiat, walletData) { Maze.summary() }
 
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/*")) { uri ->
         if (uri != null) runCatching {
@@ -93,18 +95,20 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
             PageHeader(t("hold.title"), t("hold.sub")) {
                 TopActions(nav, settings = false)
                 if (settings.expert) IconBtn(R.drawable.ic_upload_simple) { menu = true }
-                IconBtn(R.drawable.ic_plus, tint = p.accent) { nav.go(Route.Trade()) }
+                IconBtn(R.drawable.ic_plus, tint = p.accent) { addMenu = true }
             }
             Gap(12)
             // Summary — only once there is something to sum up.
-            if (profile.trades.isNotEmpty()) {
+            if (profile.trades.isNotEmpty() || sum.holdings.isNotEmpty()) {
             Glass(Modifier.fillMaxWidth()) {
                 Text(t("home.value"), style = Type.cardTitle, color = p.textMid)
                 Text(if (sum.holdings.isEmpty()) Fmt.DASH else Fmt.money(sum.valueFiat, fiat), style = Type.big, color = p.text)
+                if (profile.trades.isNotEmpty()) {
                 Gap(10)
                 Row {
                     KeyValue(t("hold.cost"), Fmt.money(sum.costFiat, fiat, 0), Modifier.weight(1f))
-                    KeyValue(t("hold.pnl"), "${Fmt.signedMoney(sum.pnlFiat, fiat, 0)} · ${Fmt.pct(sum.pnlPct, 1)}", Modifier.weight(1.4f), p.change(sum.pnlPct))
+                    KeyValue(t("hold.pnl"), if (sum.costFiat <= 0 && sum.unknownCost.isNotEmpty()) Fmt.DASH
+                        else "${Fmt.signedMoney(sum.pnlFiat, fiat, 0)} · ${Fmt.pct(sum.pnlPct, 1)}", Modifier.weight(1.4f), p.change(sum.pnlPct))
                 }
                 Gap(8)
                 Row {
@@ -112,10 +116,19 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
                     if (settings.expert) KeyValue(t("hold.pnl_usd"), Fmt.signedMoney(sum.pnlUsd, "USD", 0), Modifier.weight(1.4f), p.change(sum.pnlUsd))
                     else Spacer(Modifier.weight(1.4f))
                 }
+                }
+                if (profile.trades.isEmpty()) {
+                    Text(t("m.hold.wallets_only"), style = Type.small, color = p.muted, modifier = Modifier.padding(top = 6.dp))
+                } else if (sum.unknownCost.isNotEmpty()) {
+                    val shown = sum.unknownCost.take(6).joinToString(", ") + if (sum.unknownCost.size > 6) " +${sum.unknownCost.size - 6}" else ""
+                    Text(t("m.hold.unknown_cost", "coins" to shown), style = Type.small, color = p.muted,
+                        modifier = Modifier.padding(top = 10.dp))
+                }
             }
             }
             Gap(12)
-            Segmented(listOf("positions" to t("hold.tab_positions"), "trades" to t("hold.tab_trades"), "alloc" to t("hold.tab_alloc")), tab) { tab = it }
+            Segmented(listOf("positions" to t("hold.tab_positions"), "wallets" to t("m.wal.tab"), "trades" to t("hold.tab_trades"),
+                "alloc" to t("hold.tab_alloc")), tab) { tab = it }
             Gap(12)
         }
 
@@ -123,20 +136,32 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
             "positions" -> item {
                 if (sum.holdings.isEmpty()) {
                     EmptyState(R.drawable.ic_wallet, t("tip.start_trades.t"), t("tip.start_trades.b")) {
-                        PrimaryButton(t("hold.add"), icon = R.drawable.ic_plus) { nav.go(Route.Trade()) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PrimaryButton(t("m.wal.add_short"), icon = R.drawable.ic_wallet) { nav.go(Route.WalletEdit()) }
+                            GhostButton(t("hold.add"), icon = R.drawable.ic_plus) { nav.go(Route.Trade()) }
+                        }
                     }
                 } else Glass(Modifier.fillMaxWidth(), padding = 0.dp) {
                     sum.holdings.forEachIndexed { i, h ->
                         if (i > 0) Divider(Modifier.padding(horizontal = 14.dp))
-                        Column(Modifier.fillMaxWidth().clickable { nav.go(Route.Chart(h.position.coinId)) }.padding(14.dp)) {
+                        Column(Modifier.fillMaxWidth().clickable {
+                            if (com.mazecrypto.app.core.isSyntheticCoin(h.position.coinId)) tab = "wallets" else nav.go(Route.Chart(h.position.coinId))
+                        }.padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(h.position.symbol, style = Type.strong, color = p.text)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(h.position.symbol, style = Type.strong, color = p.text)
+                                        if (h.position.source == "wallet") {
+                                            Spacer(Modifier.width(6.dp))
+                                            Badge(t("m.wal.badge"), p.textMid)
+                                        }
+                                    }
                                     Text(Fmt.amount(h.position.amount), style = Type.numSmall, color = p.muted)
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(Fmt.money(h.valueFiat, fiat), style = Type.num, color = p.text)
-                                    Text("${Fmt.signedMoney(h.pnlFiat, fiat, 0)} · ${Fmt.pct(h.pnlPct, 1)}", style = Type.numSmall, color = p.change(h.pnlPct))
+                                    Text(if (!h.position.costKnown) t("m.hold.no_cost") else "${Fmt.signedMoney(h.pnlFiat, fiat, 0)} · ${Fmt.pct(h.pnlPct, 1)}",
+                                        style = Type.numSmall, color = if (!h.position.costKnown) p.muted else p.change(h.pnlPct))
                                 }
                             }
                             Gap(8)
@@ -181,6 +206,8 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
                 }
             }
 
+            "wallets" -> item { Column { WalletsTab(nav, fiat) } }
+
             else -> item { Allocation(nav, fiat) }
         }
     }
@@ -195,6 +222,11 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
                 "import" -> open.launch(arrayOf("text/*", "application/json", "text/csv", "text/comma-separated-values"))
                 "tax" -> yearPick = true
             }
+        }
+    }
+    if (addMenu) {
+        Picker(t("hold.add"), listOf("wallet" to t("m.wal.add"), "trade" to t("trade.new")), null, onDismiss = { addMenu = false }) { a ->
+            if (a == "wallet") nav.go(Route.WalletEdit()) else nav.go(Route.Trade())
         }
     }
     if (yearPick) {
@@ -217,7 +249,8 @@ private fun Allocation(nav: Nav, fiat: String) {
     val p = LocalPalette.current
     val profile by Maze.profile.collectAsStateWithLifecycle()
     val snap by Maze.snapshot.collectAsStateWithLifecycle()
-    val sum = remember(snap, profile, fiat) { Maze.summary() }
+    val walletData by Maze.walletData.collectAsStateWithLifecycle()
+    val sum = remember(snap, profile, fiat, walletData) { Maze.summary() }
     var amount by remember { mutableStateOf("") }
     val targets = profile.targets
     fun name(k: String) = if (k == OTHER) t("targets.other") else profile.targetSymbols[k] ?: Maze.coinName(k)

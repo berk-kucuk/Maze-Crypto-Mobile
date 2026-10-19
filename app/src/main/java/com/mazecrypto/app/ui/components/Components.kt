@@ -260,6 +260,9 @@ fun Field(
     singleLine: Boolean = true,
     error: Boolean = false,
     supporting: String? = null,
+    keyboard: KeyboardOptions? = null,
+    textStyle: TextStyle? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val p = LocalPalette.current
     OutlinedTextField(
@@ -268,8 +271,9 @@ fun Field(
         placeholder = placeholder?.let { { Text(it, style = Type.body, color = p.muted) } },
         singleLine = singleLine, isError = error,
         supportingText = supporting?.let { { Text(it, style = Type.small) } },
-        textStyle = Type.body.copy(color = p.text, fontFeatureSettings = if (number) "tnum" else null),
-        keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
+        textStyle = (textStyle ?: Type.body).copy(color = p.text, fontFeatureSettings = if (number) "tnum" else null),
+        keyboardOptions = keyboard ?: if (number) KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
+        trailingIcon = trailing,
         shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = p.accent.copy(alpha = 0.6f), unfocusedBorderColor = p.glassLine,

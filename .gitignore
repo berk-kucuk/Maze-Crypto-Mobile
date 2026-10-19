@@ -33,3 +33,9 @@ dist/
 # local tooling
 .claude/
 *.log
+
+# secrets that must never be committed
+.env
+.env.*
+*.pem
+*.p12

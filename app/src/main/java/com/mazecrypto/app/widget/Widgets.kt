@@ -25,6 +25,8 @@ import com.mazecrypto.app.core.Fmt
 import com.mazecrypto.app.core.t
 import com.mazecrypto.app.data.Maze
 import com.mazecrypto.app.work.RefreshJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -739,9 +741,29 @@ object Widgets {
 // ── providers ───────────────────────────────────────────────────────────────
 
 abstract class MazeWidget : AppWidgetProvider() {
+    /**
+     * Redraw at once, then — when the data is old — refresh right here. This
+     * is the platform's 30-minute widget timer (updatePeriodMillis): it still
+     * arrives when the system or the phone maker defers the app's jobs, so
+     * widgets keep moving on phones that would otherwise freeze them.
+     */
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         Maze.init(context)
         Widgets.updateAll(context)
+        val age = System.currentTimeMillis() - (WidgetData.load(context)?.ts ?: 0L)
+        if (Maze.settings.value.backgroundMinutes == 0 || age < STALE_FOR_TIMER_MS) return
+        val pending = goAsync()
+        Maze.scope.launch {
+            try {
+                // A broadcast gets well under a minute; a slow network must not hold it past that.
+                withTimeoutOrNull(25_000) {
+                    com.mazecrypto.app.work.BackgroundLog.run(context, "widget") { Maze.refresh(background = true) }
+                }
+                Widgets.updateAll(context)
+            } finally {
+                pending.finish()
+            }
+        }
     }
 
     /** A resize, or the launcher reporting sizes for the first time (API 26-30 picks here). */
@@ -757,6 +779,9 @@ abstract class MazeWidget : AppWidgetProvider() {
         RefreshJob.runNow(context)
     }
 }
+
+/** Older than this when the widget timer fires: refresh. Younger: the job already did. */
+private const val STALE_FOR_TIMER_MS = 10 * 60 * 1000L
 
 class FavoritesWidget : MazeWidget()
 

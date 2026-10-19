@@ -38,7 +38,7 @@ class RefreshJob : JobService() {
         Maze.init(applicationContext)
         job = Maze.scope.launch {
             try {
-                Maze.refresh(background = true)
+                BackgroundLog.run(applicationContext, "job") { Maze.refresh(background = true) }
             } finally {
                 Widgets.clearBusy(applicationContext)
                 Widgets.updateAll(applicationContext)
@@ -96,6 +96,44 @@ class RefreshJob : JobService() {
             }
         }
     }
+}
+
+/**
+ * When background refreshes last ran and whether they got fresh data, so
+ * Settings can show it: "widgets never update" is almost always the phone
+ * holding background work back, and that should be visible, not guessed.
+ */
+object BackgroundLog {
+    private const val PREFS = "background"
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Run one background refresh and record it. [source] is "job" or "widget". */
+    suspend fun run(ctx: Context, source: String, block: suspend () -> Unit) {
+        val start = System.currentTimeMillis()
+        try {
+            block()
+        } finally {
+            val snap = Maze.snapshot.value
+            val ok = snap != null && !snap.offline && snap.ts >= start
+            prefs(ctx).edit().putLong("last_run", start).putString("last_source", source).putBoolean("last_ok", ok)
+                .apply { if (ok) putLong("last_ok_ts", start) }.apply()
+        }
+    }
+
+    /** (last run, last fresh run, last run was fresh) in epoch ms; 0 = never. */
+    fun status(ctx: Context): Triple<Long, Long, Boolean> {
+        val p = prefs(ctx)
+        return Triple(p.getLong("last_run", 0), p.getLong("last_ok_ts", 0), p.getBoolean("last_ok", false))
+    }
+
+    /** True when Android exempts the app from battery optimisation (background work runs on time). */
+    fun unrestricted(ctx: Context): Boolean =
+        runCatching { ctx.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }.getOrDefault(false)
+
+    /** The app's standby bucket (API 28+): 10 active … 45 restricted; null when unknown. */
+    fun bucket(ctx: Context): Int? = if (Build.VERSION.SDK_INT >= 28)
+        runCatching { ctx.getSystemService(android.app.usage.UsageStatsManager::class.java).appStandbyBucket }.getOrNull() else null
 }
 
 /** Notifications for alert rules that became true. */

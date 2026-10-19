@@ -24,6 +24,8 @@ import kotlinx.coroutines.withContext
 open class NetError(message: String) : Exception(message)
 class HostNotAllowed(message: String) : NetError(message)
 class RateLimited(message: String) : NetError(message)
+/** A definite answer from the server that is not 200 — e.g. 404 for an address an indexer has never seen. */
+class HttpError(val code: Int, message: String) : NetError(message)
 class ValidationError(message: String) : Exception(message)
 class NotSupported(message: String) : Exception(message)
 
@@ -76,7 +78,14 @@ class Http(
         return "$url?$q"
     }
 
-    suspend fun get(url: String, params: Map<String, Any>? = null, maxBytes: Int = 16 * 1024 * 1024): ByteArray {
+    suspend fun get(url: String, params: Map<String, Any>? = null, maxBytes: Int = 16 * 1024 * 1024): ByteArray =
+        request(url, params, null, maxBytes)
+
+    /** POST a JSON body (JSON-RPC reads: balances, transactions). Same allow-list, spacing and retries as GET. */
+    suspend fun post(url: String, body: String, maxBytes: Int = 16 * 1024 * 1024): ByteArray =
+        request(url, null, body, maxBytes)
+
+    private suspend fun request(url: String, params: Map<String, Any>?, body: String?, maxBytes: Int): ByteArray {
         val h = host(url)
         if ((downUntil[h] ?: 0L) > System.currentTimeMillis()) {
             // Recently unreachable: fail fast so offline mode shows cached data at once.
@@ -87,7 +96,7 @@ class Http(
         for (attempt in 0..retries) {
             space(h)
             requests++
-            val result = withContext(Dispatchers.IO) { runCatching { fetchOnce(full, maxBytes) } }
+            val result = withContext(Dispatchers.IO) { runCatching { fetchOnce(full, body, maxBytes) } }
             val r = result.getOrElse { e ->
                 when (e) {
                     is UnknownHostException, is ConnectException -> {
@@ -104,7 +113,7 @@ class Http(
                     else -> throw NetError("$h: ${e.javaClass.simpleName}")
                 }
             } ?: continue
-            val (code, body, retryAfter) = r
+            val (code, bytes, retryAfter) = r
             if (code == 429) {
                 val d = retryAfter?.toDoubleOrNull() ?: (2.0 * (attempt + 1))
                 if (d > 10 || attempt == retries) throw RateLimited("$h: rate limited")
@@ -116,13 +125,13 @@ class Http(
                 delay(400L * (attempt + 1))
                 continue
             }
-            if (code != 200) throw NetError("$h: HTTP $code")
-            return body
+            if (code != 200) throw HttpError(code, "$h: HTTP $code")
+            return bytes
         }
         throw NetError("$h: ${lastErr?.javaClass?.simpleName ?: "failed"}")
     }
 
-    private fun fetchOnce(url: String, maxBytes: Int): Triple<Int, ByteArray, String?> {
+    private fun fetchOnce(url: String, body: String?, maxBytes: Int): Triple<Int, ByteArray, String?> {
         val conn = (if (proxy != null) URL(url).openConnection(proxy) else URL(url).openConnection()) as HttpURLConnection
         try {
             conn.instanceFollowRedirects = false
@@ -131,6 +140,14 @@ class Http(
             conn.useCaches = false
             conn.setRequestProperty("User-Agent", USER_AGENT)
             conn.setRequestProperty("Accept", "application/json, text/xml;q=0.9")
+            if (body != null) {
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val out = body.toByteArray(Charsets.UTF_8)
+                conn.setFixedLengthStreamingMode(out.size)
+                conn.outputStream.use { it.write(out) }
+            }
             val code = conn.responseCode
             if (code != 200) return Triple(code, ByteArray(0), conn.getHeaderField("Retry-After"))
             val bytes = conn.inputStream.use { input ->
@@ -150,8 +167,11 @@ class Http(
         }
     }
 
-    suspend fun getJson(url: String, params: Map<String, Any>? = null): Any {
-        val bytes = get(url, params)
+    suspend fun getJson(url: String, params: Map<String, Any>? = null): Any = parseJson(url, get(url, params))
+
+    suspend fun postJson(url: String, body: Any): Any = parseJson(url, post(url, body.toString()))
+
+    private fun parseJson(url: String, bytes: ByteArray): Any {
         return try {
             JSONTokener(String(bytes, Charsets.UTF_8)).nextValue()
         } catch (e: Exception) {

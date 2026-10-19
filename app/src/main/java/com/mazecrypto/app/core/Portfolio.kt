@@ -20,9 +20,13 @@ class Position(val coinId: String, val symbol: String) {
     var realizedUsd: Double? = 0.0
     var feesFiat = 0.0
     var trades = 0
+    /** False for a coin held in a wallet without recorded buys: its cost basis is unknown, not zero. */
+    var costKnown = true
+    /** "trades" (replayed from the trades) or "wallet" (amount from the user's addresses). */
+    var source = "trades"
 
-    val avgCostFiat: Double? get() = if (amount > EPS) costFiat / amount else null
-    val avgCostUsd: Double? get() = costUsd?.takeIf { amount > EPS }?.let { it / amount }
+    val avgCostFiat: Double? get() = if (costKnown && amount > EPS) costFiat / amount else null
+    val avgCostUsd: Double? get() = costUsd?.takeIf { costKnown && amount > EPS }?.let { it / amount }
 }
 
 class PortfolioError(message: String) : Exception(message)
@@ -79,7 +83,7 @@ fun buildPositions(trades: Iterable<Trade>, base: String, basePerUsd: Double? = 
 class Holding(val position: Position, val priceFiat: Double?, val priceUsd: Double?) {
     val valueFiat: Double? get() = priceFiat?.let { position.amount * it }
     val valueUsd: Double? get() = priceUsd?.let { position.amount * it }
-    val pnlFiat: Double? get() = valueFiat?.let { it - position.costFiat }
+    val pnlFiat: Double? get() = if (!position.costKnown) null else valueFiat?.let { it - position.costFiat }
     val pnlUsd: Double? get() {
         val v = valueUsd ?: return null
         val c = position.costUsd ?: return null
@@ -106,8 +110,12 @@ class Summary(
     val costUsd: Double?,
     val realizedFiat: Double,
     val weights: Map<String, Double>,  // coin_id -> percent of value
+    /** Value of the holdings whose cost basis is known — what [costFiat] is compared with. */
+    val knownValueFiat: Double = valueFiat,
+    /** Symbols held without a known cost basis (wallet coins never recorded as trades). */
+    val unknownCost: List<String> = emptyList(),
 ) {
-    val pnlFiat: Double get() = valueFiat - costFiat
+    val pnlFiat: Double get() = knownValueFiat - costFiat
     val pnlPct: Double? get() = if (costFiat > EPS) pnlFiat / costFiat * 100.0 else null
     val pnlUsd: Double? get() = if (valueUsd == null || costUsd == null) null else valueUsd - costUsd
 }
@@ -116,15 +124,17 @@ fun summarize(positions: Map<String, Position>, pricesFiat: Map<String, Double>,
     val holdings = positions.values.filter { it.amount > EPS }
         .map { Holding(it, pricesFiat[it.coinId], pricesUsd[it.coinId]) }
     val value = holdings.sumOf { it.valueFiat ?: 0.0 }
-    val cost = holdings.sumOf { it.position.costFiat }
+    val cost = holdings.filter { it.position.costKnown }.sumOf { it.position.costFiat }
     val usdVals = holdings.map { it.valueUsd }
     val usdCosts = holdings.map { it.position.costUsd }
     val valueUsd = if (usdVals.any { it == null }) null else usdVals.sumOf { it!! }
     val costUsd = if (usdCosts.any { it == null }) null else usdCosts.sumOf { it!! }
+    val known = holdings.filter { it.position.costKnown }
     val weights = if (value > 0) holdings.associate { it.position.coinId to (it.valueFiat ?: 0.0) / value * 100.0 } else emptyMap()
     return Summary(
         holdings.sortedByDescending { it.valueFiat ?: 0.0 }, value, cost, valueUsd, costUsd,
         positions.values.sumOf { it.realizedFiat }, weights,
+        known.sumOf { it.valueFiat ?: 0.0 }, holdings.filter { !it.position.costKnown }.map { it.position.symbol },
     )
 }
 

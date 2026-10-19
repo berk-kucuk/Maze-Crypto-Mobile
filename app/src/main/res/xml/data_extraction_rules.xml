@@ -2,6 +2,8 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="widget.json" />
+        <!-- Watched addresses reveal holdings and history: phone-to-phone transfer only. -->
+        <exclude domain="file" path="wallets.json" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="widget.json" />

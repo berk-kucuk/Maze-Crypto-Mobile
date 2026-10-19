@@ -62,7 +62,8 @@ fun HomeScreen(nav: Nav) {
     val prefs = remember { ctx.getSharedPreferences("ui", Context.MODE_PRIVATE) }
     var promo by remember { mutableStateOf(!prefs.getBoolean("widget_promo_done", false) && !Widgets.hasAny(ctx)) }
     val fiat = settings.fiat
-    val sum = remember(snap, profile, settings.fiat) { Maze.summary() }
+    val walletData by Maze.walletData.collectAsStateWithLifecycle()
+    val sum = remember(snap, profile, settings.fiat, walletData) { Maze.summary() }
 
     TabScreen {
         item {
@@ -76,8 +77,9 @@ fun HomeScreen(nav: Nav) {
                 StatTile(Modifier.weight(1f), R.drawable.ic_wallet, t("home.value"),
                     if (sum.holdings.isEmpty()) Fmt.DASH else Fmt.money(sum.valueFiat, fiat, if (sum.valueFiat >= 1000) 0 else 2),
                     if (sum.holdings.isEmpty()) t("watch.no_trades")
+                    else if (sum.costFiat <= 0 && sum.unknownCost.isNotEmpty()) t("m.hold.from_wallets")
                     else "${Fmt.signedMoney(sum.pnlFiat, fiat, 0)} (${Fmt.pct(sum.pnlPct)})",
-                    if (sum.holdings.isEmpty()) p.muted else p.change(sum.pnlPct)) { nav.tab(Route.Portfolio()) }
+                    if (sum.holdings.isEmpty() || sum.costFiat <= 0) p.muted else p.change(sum.pnlPct)) { nav.tab(Route.Portfolio()) }
                 val day = snap?.let { s -> valueChange24h(sum, s.rows.associate { it.coin.id to it.change24h }) }
                 StatTile(Modifier.weight(1f), R.drawable.ic_clock, t("home.today"),
                     day?.let { Fmt.signedMoney(it.first, fiat, 0) } ?: Fmt.DASH,

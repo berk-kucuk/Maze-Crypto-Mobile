@@ -89,6 +89,7 @@ fun SettingsScreen(nav: Nav) {
             Segmented(listOf("1h" to "1h", "24h" to "24h", "7d" to "7d"), s.widgetChange) { v -> Maze.updateSettings { it.copy(widgetChange = v) } }
             Gap(6)
             ValueRow(t("m.set.background"), minutes(s.backgroundMinutes), t("m.set.background_help")) { picker = "bg" }
+            if (s.backgroundMinutes > 0) BackgroundStatus()
             SwitchRow(t("m.set.private"), s.widgetPrivate, t("m.set.private_help")) { v -> Maze.updateSettings { it.copy(widgetPrivate = v) } }
         }
 
@@ -219,3 +220,39 @@ fun SettingsScreen(nav: Nav) {
     }
 }
 
+
+/**
+ * When the background refresh last ran, and what is holding it back if it
+ * does not: battery optimisation or a restricted standby bucket.
+ */
+@Composable
+private fun BackgroundStatus() {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val now = com.mazecrypto.app.ui.rememberNow(30_000)
+    val (lastRun, lastOk, ok) = remember(now) { com.mazecrypto.app.work.BackgroundLog.status(ctx) }
+    val unrestricted = remember(now) { com.mazecrypto.app.work.BackgroundLog.unrestricted(ctx) }
+    val bucket = remember(now) { com.mazecrypto.app.work.BackgroundLog.bucket(ctx) }
+    val limit = Maze.settings.value.backgroundMinutes * 60_000L
+    val late = lastOk == 0L || now - lastOk > maxOf(limit * 3, 90 * 60_000L)
+    val text = when {
+        lastRun == 0L -> t("m.set.bg_never")
+        ok -> t("m.set.bg_last", "age" to com.mazecrypto.app.core.Fmt.age((now - lastRun) / 1000.0))
+        else -> t("m.set.bg_last_failed", "age" to com.mazecrypto.app.core.Fmt.age((now - lastRun) / 1000.0))
+    }
+    Column(Modifier.padding(vertical = 6.dp)) {
+        Text(text, style = Type.small, color = if (late) p.warn else p.muted)
+        // 40 = rare, 45 = restricted: periodic work then runs a few times a day at most.
+        val held = !unrestricted && (late || (bucket != null && bucket >= 40))
+        if (held) {
+            Text(t("m.set.bg_held"), style = Type.small, color = p.textMid, modifier = Modifier.padding(top = 4.dp))
+            Gap(6)
+            GhostButton(t("m.set.bg_battery"), Modifier.fillMaxWidth()) {
+                runCatching {
+                    ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:" + ctx.packageName)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
+        }
+    }
+}

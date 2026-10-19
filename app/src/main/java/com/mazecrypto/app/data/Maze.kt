@@ -17,6 +17,12 @@ import com.mazecrypto.app.core.TechState
 import com.mazecrypto.app.core.Tip
 import com.mazecrypto.app.core.TipFormatter
 import com.mazecrypto.app.core.Trade
+import com.mazecrypto.app.core.Transfer
+import com.mazecrypto.app.core.Wallet
+import com.mazecrypto.app.core.WalletBalance
+import com.mazecrypto.app.core.isSyntheticCoin
+import com.mazecrypto.app.core.mergeActivity
+import com.mazecrypto.app.core.mergeWallets
 import com.mazecrypto.app.core.buildPositions
 import com.mazecrypto.app.core.current
 import com.mazecrypto.app.core.dataNeeds
@@ -33,6 +39,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +70,7 @@ object Maze {
     private lateinit var settingsFile: File
     private lateinit var store: ProfileStore
     private lateinit var alertFile: File
+    private lateinit var walletStore: WalletStore
     lateinit var cache: Cache
         private set
 
@@ -77,6 +87,14 @@ object Maze {
     private val _alerts = MutableStateFlow<List<AlertEntry>>(emptyList())
     val alertLog: StateFlow<List<AlertEntry>> = _alerts.asStateFlow()
     private val _tech = MutableStateFlow<Map<String, TechState>>(emptyMap())
+    private val _wallets = MutableStateFlow<List<Wallet>>(emptyList())
+    val wallets: StateFlow<List<Wallet>> = _wallets.asStateFlow()
+    private val _walletData = MutableStateFlow<Map<String, WalletStatus>>(emptyMap())
+    /** The last balance of every watched address, by wallet id. */
+    val walletData: StateFlow<Map<String, WalletStatus>> = _walletData.asStateFlow()
+
+    /** [staleAge] (seconds) when the balance is a cached one after a failed lookup; [error] says why. */
+    data class WalletStatus(val balance: WalletBalance?, val staleAge: Double? = null, val error: String? = null, val loading: Boolean = false)
 
     @Volatile private var service: MarketService? = null
     private val refreshLock = Mutex()
@@ -90,12 +108,14 @@ object Maze {
         settingsFile = File(app.filesDir, "settings.json")
         store = ProfileStore(File(app.filesDir, "profile.json"))
         alertFile = File(app.filesDir, "alerts.json")
+        walletStore = WalletStore(File(app.filesDir, "wallets.json"))
         cache = Cache(File(app.cacheDir, "net"))
         val s = Settings.load(settingsFile)
         _settings.value = s
         I18n.setLanguage(s.language)
         _profile.value = store.load()
         _alerts.value = loadAlerts()
+        _wallets.value = walletStore.load()
         initialized = true
     }
 
@@ -119,12 +139,25 @@ object Maze {
             val c = r.condition
             if (c.coinId.isNotEmpty() && c.symbol.isNotEmpty()) coins.getOrPut(c.coinId) { Coin(c.coinId, c.symbol, c.symbol) }
         }
+        // Wallet coins: the chain's own coin and known tokens up front, so the first balance already has a price.
+        val data = _walletData.value
+        for (w in _wallets.value) {
+            if (w.manual) {
+                if (w.coinId.isNotEmpty()) coins.getOrPut(w.coinId) { Coin(w.coinId, w.symbol, w.name.ifEmpty { w.symbol }) }
+                continue
+            }
+            Chains.of(w.chain)?.native?.let { c -> coins.getOrPut(c.id) { c } }
+            data[w.id]?.balance?.assets?.forEach { a ->
+                if (!isSyntheticCoin(a.coinId) && a.amount > 0) coins.getOrPut(a.coinId) { Coin(a.coinId, a.symbol, a.name) }
+            }
+        }
         return coins.values.toList()
     }
 
     /** Paint the last known data immediately; the network refresh replaces it. */
     suspend fun showCached() = withContext(Dispatchers.Default) {
         if (_snap.value != null) return@withContext
+        if (_walletData.value.isEmpty()) runCatching { refreshWallets(service(), cacheOnly = true) }
         val snap = runCatching { service().refresh(trackedCoins(), cacheOnly = true) }.getOrNull() ?: return@withContext
         if (_snap.value == null && snap.rows.any { it.priceFiat != null }) {
             _snap.value = Snapshot(snap.rows, snap.fx, snap.ts, snap.staleAge ?: 0.0, false, snap.errors)
@@ -146,7 +179,18 @@ object Maze {
         _refreshing.value = true
         try {
             val svc = service()
-            val snap = svc.refresh(trackedCoins())
+            val snap = coroutineScope {
+                // Balances and prices in parallel; they use different hosts. Prices are shown
+                // as soon as they arrive: one slow explorer must not hold the whole screen back.
+                val walletJob = async { runCatching { refreshWallets(svc) } }
+                var s = svc.refresh(trackedCoins())
+                _snap.value = s
+                walletJob.await()
+                // A wallet turned up a coin nobody had asked a price for yet.
+                val have = s.rows.map { it.coin.id }.toSet()
+                if (trackedCoins().any { it.id !in have }) s = svc.refresh(trackedCoins())
+                s
+            }
             _snap.value = snap
             updateTips()
             // Wait for it: the background job may be the last thing this process does.
@@ -172,6 +216,132 @@ object Maze {
         }
         _tech.value = out
         updateTips()
+    }
+
+    // ── wallets ─────────────────────────────────────────────────────────────
+
+    private fun walletTtl(): Double = maxOf(45.0, _settings.value.refreshSeconds - 5.0)
+
+    /** Every watched address at once; one that fails keeps its last balance, marked stale. */
+    private suspend fun refreshWallets(svc: MarketService, cacheOnly: Boolean = false) = coroutineScope {
+        val list = _wallets.value.filter { !it.manual }
+        list.map { w -> async { w.id to fetchWallet(svc, w, cacheOnly) } }.awaitAll().forEach { (id, st) ->
+            if (st != null) _walletData.value = _walletData.value + (id to st)
+        }
+        _walletData.value = _walletData.value.filterKeys { id -> _wallets.value.any { it.id == id } }
+    }
+
+    private suspend fun fetchWallet(svc: MarketService, w: Wallet, cacheOnly: Boolean): WalletStatus? = try {
+        val f = svc.wallets.balance(w, walletTtl(), cacheOnly)
+        WalletStatus(f.value, f.staleAge, f.error)
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        if (cacheOnly) null else WalletStatus(_walletData.value[w.id]?.balance, error = e.message ?: e.javaClass.simpleName)
+    }
+
+    /** Look up one address now (after adding it, or from its screen), then refresh what depends on it. */
+    fun refreshWalletAsync(id: String) {
+        scope.launch {
+            val w = _wallets.value.firstOrNull { it.id == id } ?: return@launch
+            if (w.manual) return@launch
+            _walletData.value = _walletData.value + (id to (_walletData.value[id]?.copy(loading = true) ?: WalletStatus(null, loading = true)))
+            val st = fetchWallet(service(), w, cacheOnly = false)
+            _walletData.value = _walletData.value + (id to (st ?: WalletStatus(null)))
+            afterWalletChange()
+        }
+    }
+
+    private fun afterWalletChange() {
+        val have = _snap.value?.rows?.map { it.coin.id }?.toSet() ?: emptySet()
+        if (trackedCoins().any { it.id !in have }) refreshAsync() else {
+            updateTips()
+            publishWidgets()
+        }
+    }
+
+    private fun saveWallets(list: List<Wallet>) {
+        walletStore.save(list)
+        _wallets.value = list
+        _walletData.value = _walletData.value.filterKeys { id -> list.any { it.id == id } }
+    }
+
+    /**
+     * Add watched addresses (one per network for an EVM address on several).
+     * Returns an error message, or null when saved. Duplicates are refused.
+     */
+    fun addWallets(new: List<Wallet>): String? {
+        val cur = _wallets.value
+        if (cur.size + new.size > WalletStore.MAX_WALLETS) return t("m.wal.err_too_many", "n" to WalletStore.MAX_WALLETS)
+        val taken = cur.filter { !it.manual }.map { com.mazecrypto.app.core.Address.key(it.chain, it.address) }.toSet()
+        val dup = new.firstOrNull { !it.manual && com.mazecrypto.app.core.Address.key(it.chain, it.address) in taken }
+        if (dup != null) return t("m.wal.err_duplicate", "chain" to (Chains.of(dup.chain)?.name ?: dup.chain))
+        saveWallets(cur + new)
+        new.forEach { if (it.manual) Unit else refreshWalletAsync(it.id) }
+        afterWalletChange()
+        return null
+    }
+
+    fun updateWallet(w: Wallet) {
+        saveWallets(_wallets.value.map { if (it.id == w.id) w else it })
+        afterWalletChange()
+    }
+
+    fun deleteWallet(id: String) {
+        saveWallets(_wallets.value.filter { it.id != id })
+        updateTips()
+        publishWidgets()
+    }
+
+    /** Coin id -> (symbol, total amount) over the wallets that count toward the portfolio. */
+    fun walletHoldings(): Map<String, Pair<String, Double>> {
+        val out = LinkedHashMap<String, Pair<String, Double>>()
+        val data = _walletData.value
+        for (w in _wallets.value) {
+            if (!w.inPortfolio) continue
+            val assets = if (w.manual) {
+                if (w.coinId.isEmpty() || (w.amount ?: 0.0) <= 0) emptyList() else listOf(w.coinId to (w.symbol to (w.amount ?: 0.0)))
+            } else data[w.id]?.balance?.assets?.filter { it.amount > 0 }?.map { it.coinId to (it.symbol to it.amount) } ?: emptyList()
+            for ((cid, sa) in assets) {
+                val prev = out[cid]
+                out[cid] = sa.first to ((prev?.second ?: 0.0) + sa.second)
+            }
+        }
+        return out
+    }
+
+    /** USD prices the indexers gave for tokens CoinGecko is not asked about. */
+    private fun syntheticPrices(): Map<String, Double> {
+        val out = HashMap<String, Double>()
+        _walletData.value.values.forEach { st ->
+            st.balance?.assets?.forEach { a -> if (isSyntheticCoin(a.coinId)) a.priceUsd?.let { out[a.coinId] = it } }
+        }
+        return out
+    }
+
+    /** History of [ids] (all wallets when empty), merged so transfers between them show once. */
+    suspend fun walletActivity(ids: Collection<String> = emptyList()): Pair<List<Transfer>, List<String>> = withContext(Dispatchers.Default) {
+        val svc = service()
+        val list = _wallets.value.filter { !it.manual && (ids.isEmpty() || it.id in ids) }
+        val errors = mutableListOf<String>()
+        val parts = coroutineScope {
+            list.map { w ->
+                async {
+                    try {
+                        val f = svc.wallets.activity(w)
+                        f.error?.let { synchronized(errors) { errors += it } }
+                        // A token the balance check did not accept (unpriced, flagged, dust) is spam in the history too.
+                        val accepted = _walletData.value[w.id]?.balance?.assets?.map { it.coinId }?.toSet() ?: emptySet()
+                        f.value.map { tr -> tr.copy(legs = tr.legs.filter { !isSyntheticCoin(it.coinId) || it.coinId in accepted }) }
+                            .filter { it.legs.isNotEmpty() || it.fee != null }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        synchronized(errors) { errors += (e.message ?: e.javaClass.simpleName) }
+                        emptyList()
+                    }
+                }
+            }.awaitAll()
+        }
+        mergeActivity(parts) to errors
     }
 
     // ── settings ────────────────────────────────────────────────────────────
@@ -214,17 +384,26 @@ object Maze {
             r.priceFiat?.let { fiat[r.coin.id] = it }
             r.priceUsd?.let { usd[r.coin.id] = it }
         }
+        val rate = fxRate()
+        syntheticPrices().forEach { (cid, p) ->
+            usd[cid] = p
+            if (rate != null) fiat[cid] = p * rate
+        }
         return fiat to usd
     }
 
     fun fxRate(): Double? = _snap.value?.fx?.get(_settings.value.fiat)
 
-    fun positions(trades: List<Trade> = _profile.value.trades): Map<String, Position> =
-        try {
+    /** Positions from the trades, with amounts taken from the wallets for every coin held in one. */
+    fun positions(trades: List<Trade> = _profile.value.trades): Map<String, Position> {
+        val fromTrades = try {
             buildPositions(trades, _settings.value.fiat, fxRate())
         } catch (e: PortfolioError) {
             emptyMap()
         }
+        val held = walletHoldings()
+        return if (held.isEmpty()) fromTrades else mergeWallets(fromTrades, held)
+    }
 
     fun summary(): Summary {
         val (fiat, usd) = prices()
@@ -286,7 +465,8 @@ object Maze {
         }
     }
 
-    fun coinName(coinId: String): String = trackedCoins().firstOrNull { it.id == coinId }?.symbol ?: coinId
+    fun coinName(coinId: String): String = trackedCoins().firstOrNull { it.id == coinId }?.symbol
+        ?: walletHoldings()[coinId]?.first ?: coinId
 
     fun alertText(a: Alert): String {
         val parts = mutableListOf<String>()
@@ -365,7 +545,7 @@ object Maze {
         val snap = _snap.value
         val x = AdvisorInput(
             fiat = st.fiat, rows = snap?.rows ?: emptyList(), watchlist = st.watchlist.map { it.id }, summary = s,
-            trades = p.trades.size, tradesWithoutRate = p.trades.count { it.usdRate == null }, targets = p.targets,
+            trades = p.trades.size, wallets = _wallets.value.size, tradesWithoutRate = p.trades.count { it.usdRate == null }, targets = p.targets,
             names = names, planAmount = plan?.amount, current = cur, planExists = plan != null, rules = p.rules.size,
             tech = _tech.value, offline = snap?.offline == true, staleAge = snap?.staleAge,
         )

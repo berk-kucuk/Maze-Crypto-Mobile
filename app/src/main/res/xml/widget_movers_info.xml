@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Placed at 4x2 (70 x n - 30 dp per n cells); adapts to any size it is
      resized to by picking among measured layouts (Widgets.kt). Redrawn by the
-     app's refresh job, never on a platform timer (updatePeriodMillis 0). -->
+     app's refresh job, and every 30 minutes by the platform as a fallback
+     (updatePeriodMillis) for phones that hold background jobs back. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     tools:ignore="UnusedAttribute"
@@ -11,7 +12,7 @@
     android:minResizeHeight="40dp"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
-    android:updatePeriodMillis="0"
+    android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_movers"
     android:previewLayout="@layout/widget_preview_movers"
     android:description="@string/widget_movers_description"

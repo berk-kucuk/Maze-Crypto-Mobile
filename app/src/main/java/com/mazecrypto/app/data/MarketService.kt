@@ -27,6 +27,8 @@ import kotlin.math.abs
  */
 class MarketService(private val settings: Settings, private val cache: Cache) {
     val http = Http(allowedHosts(), if (settings.proxyEnabled) settings.proxyUrl else null)
+    /** Wallet lookups share the same HTTP layer: allow-list, proxy and per-host spacing. */
+    val wallets = WalletService(http, cache)
     private val exchanges: List<Exchange> = settings.exchanges.mapNotNull { EXCHANGES[it]?.invoke() }
     private val chartSources: List<Exchange> = exchanges.filter { it.hasKlines } +
         EXCHANGES.filterKeys { id -> exchanges.none { it.id == id } }.values.map { it() }.filter { it.hasKlines }
@@ -256,6 +258,7 @@ class MarketService(private val settings: Settings, private val cache: Cache) {
             val hosts = HashMap<String, Double>()
             hosts += CoinGecko.HOSTS
             hosts += Fx.HOSTS
+            hosts += WalletService.HOSTS
             EXCHANGE_INFO.forEach { hosts += it.hosts }
             return hosts
         }
