@@ -40,6 +40,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,10 +95,17 @@ object Maze {
     val walletData: StateFlow<Map<String, WalletStatus>> = _walletData.asStateFlow()
 
     /** [staleAge] (seconds) when the balance is a cached one after a failed lookup; [error] says why. */
-    data class WalletStatus(val balance: WalletBalance?, val staleAge: Double? = null, val error: String? = null, val loading: Boolean = false)
+    data class WalletStatus(
+        val balance: WalletBalance?, val staleAge: Double? = null, val error: String? = null, val loading: Boolean = false,
+        /** Monero: why the last sync could not run, e.g. "tor_off" (no Tor at the configured SOCKS port). */
+        val code: String? = null,
+    ) {
+        val torMissing: Boolean get() = code in setOf("tor_off", "not_tor", "tor_check")
+    }
 
     @Volatile private var service: MarketService? = null
     private val refreshLock = Mutex()
+    private const val WALLET_TIMEOUT_MS = 45_000L
     private var initialized = false
 
     @Synchronized
@@ -116,6 +124,7 @@ object Maze {
         _profile.value = store.load()
         _alerts.value = loadAlerts()
         _wallets.value = walletStore.load()
+        MoneroSync.init(app.filesDir)
         initialized = true
     }
 
@@ -175,17 +184,30 @@ object Maze {
      */
     suspend fun refresh(background: Boolean = false) = withContext(Dispatchers.Default) {
         // Parsing a few thousand tickers is real work: never on the main thread.
-        if (!refreshLock.tryLock()) return@withContext
+        if (!refreshLock.tryLock()) {
+            // Another refresh is running (often the background job, when the app is opened): the screen
+            // waits for it, showing "Updating", instead of sitting on old data until the next turn.
+            if (background) return@withContext
+            _refreshing.value = true
+            refreshLock.lock()
+            val s0 = _snap.value
+            if (s0 != null && !s0.offline && s0.staleAge == null && System.currentTimeMillis() - s0.ts < 30_000) {
+                _refreshing.value = false
+                refreshLock.unlock()
+                return@withContext
+            }
+        }
         _refreshing.value = true
         try {
             val svc = service()
             val snap = coroutineScope {
                 // Balances and prices in parallel; they use different hosts. Prices are shown
                 // as soon as they arrive: one slow explorer must not hold the whole screen back.
-                val walletJob = async { runCatching { refreshWallets(svc) } }
+                val walletJob = async { runCatching { refreshWallets(svc, monero = !background) } }
                 var s = svc.refresh(trackedCoins())
                 _snap.value = s
-                walletJob.await()
+                // One slow or blocked explorer must not hold every later refresh back.
+                if (withTimeoutOrNull(WALLET_TIMEOUT_MS) { walletJob.await() } == null) walletJob.cancel()
                 // A wallet turned up a coin nobody had asked a price for yet.
                 val have = s.rows.map { it.coin.id }.toSet()
                 if (trackedCoins().any { it.id !in have }) s = svc.refresh(trackedCoins())
@@ -196,7 +218,8 @@ object Maze {
             // Wait for it: the background job may be the last thing this process does.
             publishWidgets()?.join()
             evaluateAlerts(svc)
-            if (!background) enrich(svc, snap)
+            // Daily candles for the assistant: slow and optional, so outside the refresh lock.
+            if (!background) scope.launch { runCatching { enrich(svc, snap) } }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
         } finally {
@@ -223,12 +246,44 @@ object Maze {
     private fun walletTtl(): Double = maxOf(45.0, _settings.value.refreshSeconds - 5.0)
 
     /** Every watched address at once; one that fails keeps its last balance, marked stale. */
-    private suspend fun refreshWallets(svc: MarketService, cacheOnly: Boolean = false) = coroutineScope {
-        val list = _wallets.value.filter { !it.manual }
+    private suspend fun refreshWallets(svc: MarketService, cacheOnly: Boolean = false, monero: Boolean = true) = coroutineScope {
+        val list = _wallets.value.filter { !it.manual && !it.moneroView }
         list.map { w -> async { w.id to fetchWallet(svc, w, cacheOnly) } }.awaitAll().forEach { (id, st) ->
             if (st != null) _walletData.value = _walletData.value + (id to st)
         }
+        // Monero view-only wallets: what the last scan found now, the scan itself in the background (it can be long).
+        _wallets.value.filter { it.moneroView }.forEach { w ->
+            val prev = _walletData.value[w.id]
+            _walletData.value = _walletData.value + (w.id to WalletStatus(MoneroSync.balance(w), error = prev?.error, loading = prev?.loading == true, code = prev?.code))
+        }
+        if (!cacheOnly && monero) syncMoneroAsync(force = false)
         _walletData.value = _walletData.value.filterKeys { id -> _wallets.value.any { it.id == id } }
+    }
+
+    private fun unmetered(): Boolean = runCatching {
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+        cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+    }.getOrDefault(false)
+
+    /** Scan the view-only Monero wallets over Tor; balances update after every batch of blocks. */
+    fun syncMoneroAsync(force: Boolean) {
+        val xmr = _wallets.value.filter { it.moneroView }
+        if (xmr.isEmpty()) return
+        scope.launch {
+            xmr.forEach { w ->
+                _walletData.value = _walletData.value + (w.id to (_walletData.value[w.id]?.copy(loading = true) ?: WalletStatus(MoneroSync.balance(w), loading = true)))
+            }
+            // History is read backwards and can be gigabytes: on Wi-Fi only, unless the user allows mobile data.
+            val history = _settings.value.moneroMobileData || unmetered()
+            MoneroSync.syncAll(xmr, _settings.value, force, history) { w, err ->
+                val msg = err?.let { if (it.startsWith("tor:")) t("m.xmr.err_" + it.removePrefix("tor:")) else it }
+                val running = MoneroSync.progress.value.containsKey(w.id)
+                val code = err?.takeIf { it.startsWith("tor:") }?.removePrefix("tor:")
+                _walletData.value = _walletData.value + (w.id to WalletStatus(MoneroSync.balance(w), error = msg, loading = running && msg == null, code = code))
+            }
+            xmr.forEach { w -> _walletData.value[w.id]?.let { _walletData.value = _walletData.value + (w.id to it.copy(loading = false)) } }
+            afterWalletChange()
+        }
     }
 
     private suspend fun fetchWallet(svc: MarketService, w: Wallet, cacheOnly: Boolean): WalletStatus? = try {
@@ -244,6 +299,7 @@ object Maze {
         scope.launch {
             val w = _wallets.value.firstOrNull { it.id == id } ?: return@launch
             if (w.manual) return@launch
+            if (w.moneroView) { syncMoneroAsync(force = true); return@launch }
             _walletData.value = _walletData.value + (id to (_walletData.value[id]?.copy(loading = true) ?: WalletStatus(null, loading = true)))
             val st = fetchWallet(service(), w, cacheOnly = false)
             _walletData.value = _walletData.value + (id to (st ?: WalletStatus(null)))
@@ -287,6 +343,7 @@ object Maze {
     }
 
     fun deleteWallet(id: String) {
+        if (_wallets.value.any { it.id == id && it.moneroView }) MoneroSync.forget(id)
         saveWallets(_wallets.value.filter { it.id != id })
         updateTips()
         publishWidgets()
@@ -327,6 +384,7 @@ object Maze {
             list.map { w ->
                 async {
                     try {
+                        if (w.moneroView) return@async MoneroSync.activity(w)
                         val f = svc.wallets.activity(w)
                         f.error?.let { synchronized(errors) { errors += it } }
                         // A token the balance check did not accept (unpriced, flagged, dust) is spam in the history too.

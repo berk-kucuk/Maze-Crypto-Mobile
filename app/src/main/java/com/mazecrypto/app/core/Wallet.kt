@@ -26,13 +26,33 @@ data class Wallet(
     /** False = watch only, left out of the portfolio (someone else's address, a cold-storage test …). */
     val inPortfolio: Boolean = true,
     val created: Long = 0,
+    /**
+     * Bitcoin/Litecoin HD account: [address] is then the account's extended public key and
+     * [script] says which addresses it makes ("pkh", "sh-wpkh", "wpkh", "tr").
+     */
+    val script: String = "",
+    /** Derivation path of the account or address on its device, e.g. m/84'/0'/0' (informational). */
+    val path: String = "",
+    /** "ledger" when read from a Ledger; "" when typed in. */
+    val device: String = "",
+    /** Monero only: a view-only wallet scanned over Tor (the view key lives in [SecretBox], never here). */
+    val view: Boolean = false,
+    /** Monero view-only: the block height to start scanning from. */
+    val restoreHeight: Long = 0,
 ) {
-    val manual: Boolean get() = chain == "monero" || chain == "manual"
+    val manual: Boolean get() = chain == "manual" || (chain == "monero" && !view)
+    /** An HD account rather than a single address. */
+    val account: Boolean get() = script.isNotEmpty() && (chain == "bitcoin" || chain == "litecoin")
+    val moneroView: Boolean get() = chain == "monero" && view
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("chain", chain); put("address", address); put("label", label)
         if (coinId.isNotEmpty()) { put("coin_id", coinId); put("symbol", symbol); put("name", name) }
         putNum("amount", amount); put("in_portfolio", inPortfolio); put("created", created)
+        if (script.isNotEmpty()) put("script", script)
+        if (path.isNotEmpty()) put("path", path)
+        if (device.isNotEmpty()) put("device", device)
+        if (view) { put("view", true); put("restore_height", restoreHeight) }
     }
 
     companion object {
@@ -40,6 +60,8 @@ data class Wallet(
             o.getString("id"), o.getString("chain"), o.optString("address"), o.optString("label"),
             o.optString("coin_id"), o.optString("symbol"), o.optString("name"), o.optDoubleOrNull("amount"),
             o.optBoolean("in_portfolio", true), o.optLong("created"),
+            o.optString("script"), o.optString("path"), o.optString("device"),
+            o.optBoolean("view", false), o.optLong("restore_height", 0),
         )
     }
 }

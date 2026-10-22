@@ -83,6 +83,7 @@ sealed interface Route {
     data class RuleEdit(val id: String? = null) : Route
     data class WalletDetail(val id: String) : Route
     data class WalletEdit(val id: String? = null, val coinId: String? = null) : Route
+    data object Ledger : Route
 }
 
 /** A plain back stack; the bottom-bar tabs reset it. */
@@ -130,11 +131,12 @@ class Nav(start: Route = Route.Home) {
         uri ?: return
         if (uri.scheme != "mazecrypto") return
         when (uri.host) {
-            "coin" -> uri.lastPathSegment?.let {
+            // Any app can send this link: only a well-formed coin id gets through.
+            "coin" -> uri.lastPathSegment?.takeIf { runCatching { com.mazecrypto.app.data.V.coinId(it) }.isSuccess }?.let {
                 // Tokens priced only by a chain indexer have no chart: show them where they are held.
                 if (com.mazecrypto.app.core.isSyntheticCoin(it)) tab(Route.Portfolio("wallets")) else { tab(Route.Home); go(Route.Chart(it)) }
             }
-            "portfolio" -> tab(Route.Portfolio())
+            "portfolio" -> tab(Route.Portfolio(uri.lastPathSegment?.takeIf { it in setOf("positions", "wallets", "alloc", "trades") } ?: "positions"))
             "alerts" -> tab(Route.Alerts)
             "plan" -> tab(Route.Plan)
             "prices" -> tab(Route.Prices())
@@ -204,6 +206,7 @@ private fun Screen(r: Route, nav: Nav) {
         is Route.RuleEdit -> RuleEditor(nav, r.id)
         is Route.WalletDetail -> com.mazecrypto.app.ui.screens.WalletDetailScreen(nav, r.id)
         is Route.WalletEdit -> com.mazecrypto.app.ui.screens.WalletEditor(nav, r.id, r.coinId)
+        Route.Ledger -> com.mazecrypto.app.ui.screens.LedgerScreen(nav)
     }
 }
 

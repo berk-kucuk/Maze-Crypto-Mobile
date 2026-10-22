@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mazecrypto.app.R
+import com.mazecrypto.app.core.Fmt
 import com.mazecrypto.app.core.t
 import com.mazecrypto.app.data.EXCHANGE_INFO
 import com.mazecrypto.app.data.Http
@@ -60,6 +61,10 @@ fun SettingsScreen(nav: Nav) {
     var proxyUrl by remember { mutableStateOf(s.proxyUrl) }
     var proxyState by remember { mutableStateOf("") }
     var askRerun by remember { mutableStateOf(false) }
+    var torHost by remember { mutableStateOf(s.torHost) }
+    var torPort by remember { mutableStateOf(s.torPort.toString()) }
+    var xmrNode by remember { mutableStateOf(s.moneroNode) }
+    var torState by remember { mutableStateOf("") }
 
     fun minutes(m: Int) = if (m == 0) t("m.set.never") else if (m < 60) t("m.set.min", "n" to m) else t("m.set.hours", "n" to m / 60)
     fun seconds(x: Int) = if (x < 60) t("m.set.sec", "n" to x) else t("m.set.min", "n" to x / 60)
@@ -71,7 +76,8 @@ fun SettingsScreen(nav: Nav) {
             Text(t("m.set.widgets_help"), style = Type.bodySmall, color = p.textMid)
             Gap(10)
             val kinds = listOf("favorites" to "widget.favorites", "grid" to "widget.grid", "coin" to "widget.coin",
-                "movers" to "widget.movers", "portfolio" to "widget.portfolio", "holdings" to "widget.holdings", "plan" to "widget.plan")
+                "movers" to "widget.movers", "portfolio" to "widget.portfolio", "trend" to "widget.trend", "wallets" to "widget.wallets",
+                "holdings" to "widget.holdings", "plan" to "widget.plan")
             kinds.chunked(2).forEach { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
                     pair.forEach { (k, label) ->
@@ -189,6 +195,62 @@ fun SettingsScreen(nav: Nav) {
             }
         }
 
+        // ── privacy & security ────────────────────────────────────────────
+        SectionTitle(t("m.sec.title"))
+        Glass(Modifier.fillMaxWidth(), padding = 12.dp) {
+            SwitchRow(t("m.sec.hide"), s.hideAmounts, t("m.sec.hide_b")) { v -> Maze.updateSettings { it.copy(hideAmounts = v) } }
+            SwitchRow(t("m.sec.screen"), s.secureScreen, t("m.sec.screen_b")) { v ->
+                Maze.updateSettings { it.copy(secureScreen = v) }
+                (ctx as? android.app.Activity)?.window?.let { w ->
+                    if (v) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                    else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+        }
+
+        // ── Tor (Orbot) & Monero ──────────────────────────────────────────
+        SectionTitle(t("m.tor.title"))
+        Glass(Modifier.fillMaxWidth()) {
+            Text(t("m.tor.help"), style = Type.bodySmall, color = p.textMid)
+            Gap(8)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(torHost, { torHost = it.trim().take(100); torState = "" }, t("m.tor.host"), Modifier.weight(2f))
+                Field(torPort, { torPort = it.filter { c -> c.isDigit() }.take(5); torState = "" }, t("m.tor.port"), Modifier.weight(1f), number = true)
+            }
+            Gap(4)
+            Field(xmrNode, { xmrNode = it.trim().take(200); torState = "" }, t("m.tor.node"), placeholder = t("m.tor.node_auto"),
+                supporting = t("m.tor.node_help"))
+            Gap(8)
+            fun edited() = s.copy(torHost = torHost.ifBlank { "127.0.0.1" }, torPort = torPort.toIntOrNull() ?: 0, moneroNode = xmrNode)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GhostButton(t("set.test"), Modifier.weight(1f)) {
+                    val e = edited()
+                    if (e.torPort !in 1..65535) { torState = t("m.tor.bad_port"); return@GhostButton }
+                    torState = t("set.testing")
+                    scope.launch {
+                        torState = try {
+                            t("m.tor.ok", "node" to com.mazecrypto.app.data.MoneroSync.test(e))
+                        } catch (x: com.mazecrypto.app.data.MoneroSync.TorError) {
+                            t("m.xmr.err_${x.code}")
+                        } catch (x: Exception) {
+                            t("set.proxy_fail", "err" to (x.message ?: x.javaClass.simpleName))
+                        }
+                    }
+                }
+                GhostButton(t("btn.save"), Modifier.weight(1f)) {
+                    val e = edited()
+                    if (e.torPort !in 1..65535) { torState = t("m.tor.bad_port"); return@GhostButton }
+                    Maze.updateSettings { it.copy(torHost = e.torHost, torPort = e.torPort, moneroNode = e.moneroNode) }
+                    torState = t("set.saved")
+                }
+            }
+            if (torState.isNotEmpty()) Text(torState, style = Type.small, color = p.textMid, modifier = Modifier.padding(top = 8.dp))
+            Gap(4)
+            SwitchRow(t("m.tor.mobile_data"), s.moneroMobileData, t("m.tor.mobile_data_b")) { v ->
+                Maze.updateSettings { it.copy(moneroMobileData = v) }
+            }
+        }
+
         // ── data ──────────────────────────────────────────────────────────
         SectionTitle(t("set.data"))
         Glass(Modifier.fillMaxWidth(), padding = 12.dp) {
@@ -197,6 +259,13 @@ fun SettingsScreen(nav: Nav) {
                 Toast.makeText(ctx, t("set.cache_cleared"), Toast.LENGTH_SHORT).show()
             }
             ValueRow(t("set.rerun_wizard"), "") { askRerun = true }
+            val freeze = remember { com.mazecrypto.app.data.Diagnostics.lastFreeze(ctx) }
+            ValueRow(t("m.diag.title"), freeze?.let { Fmt.date(it.time / 1000) } ?: t("m.diag.none"), freeze?.let { t("m.diag.sub") }) {
+                if (freeze != null) {
+                    ctx.copyText(t("m.diag.title"), freeze.text)
+                    Toast.makeText(ctx, t("m.diag.copied"), Toast.LENGTH_LONG).show()
+                }
+            }
             ValueRow(t("nav.about"), "") { nav.go(Route.About) }
         }
         Gap(16)

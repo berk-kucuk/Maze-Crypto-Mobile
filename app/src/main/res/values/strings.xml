@@ -18,4 +18,8 @@
     <string name="widget_hold_description">Each holding: share of the portfolio, value and profit/loss</string>
     <string name="widget_plan_label">Buying plan</string>
     <string name="widget_plan_description">Your next planned purchase, when it is due and progress</string>
+    <string name="widget_trend_label">Portfolio chart</string>
+    <string name="widget_trend_description">Portfolio value and its last seven days as a chart</string>
+    <string name="widget_wallets_label">Wallets</string>
+    <string name="widget_wallets_description">Your wallets\' total and each wallet: Ledger accounts, Monero scan</string>
 </resources>

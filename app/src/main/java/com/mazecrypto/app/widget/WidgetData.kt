@@ -34,7 +34,13 @@ data class WidgetData(
     val favorites: List<String>,          // ids shown on the favorites widget
     val portfolio: WPortfolio?,
     val plan: WPlan?,
+    /** Portfolio value over the last 7 days at today's amounts, oldest first. */
+    val trend: List<Double> = emptyList(),
+    val wallets: List<WWallet> = emptyList(),
 ) {
+    /** One wallet as the wallets widget shows it; [state] is ok | syncing:<pct> | error | manual. */
+    data class WWallet(val title: String, val chain: String, val device: String, val value: Double?, val state: String, val inPortfolio: Boolean, val ref: String = "")
+
     data class WCoin(
         val id: String, val sym: String, val name: String, val price: Double?,
         val ch1h: Double?, val ch24h: Double?, val ch7d: Double?, val ch30d: Double?,
@@ -89,6 +95,12 @@ data class WidgetData(
                 })
             })
         }
+        put("trend", JSONArray().apply { trend.forEach { put(it) } })
+        put("wallets", JSONArray().apply {
+            wallets.forEach { w ->
+                put(JSONObject().put("t", w.title).put("c", w.chain).put("d", w.device).putNum("v", w.value).put("s", w.state).put("p", w.inPortfolio).put("r", w.ref))
+            }
+        })
         plan?.let { pl ->
             put("plan", JSONObject().apply {
                 put("name", pl.name); put("fiat", pl.fiat); put("state", pl.state); put("index", pl.index)
@@ -143,7 +155,32 @@ data class WidgetData(
                         p.getInt("done"), p.getLong("due"), p.getDouble("amount"),
                         (p.optJSONArray("items") ?: JSONArray()).let { a -> (0 until a.length()).map { a.getJSONArray(it).let { x -> x.getString(0) to x.getDouble(1) } } })
                 },
+                o.optJSONArray("trend")?.let { a -> (0 until a.length()).map { a.getDouble(it) } } ?: emptyList(),
+                o.optJSONArray("wallets")?.objects()?.map { w ->
+                    WWallet(w.optString("t"), w.optString("c"), w.optString("d"), w.optDoubleOrNull("v"), w.optString("s"), w.optBoolean("p", true), w.optString("r"))
+                } ?: emptyList(),
             )
+        }
+
+        /** The wallets as the widget shows them: value in the portfolio currency and a short state. */
+        private fun walletsOf(): List<WWallet> {
+            val prices = com.mazecrypto.app.data.Maze.prices().first
+            val data = com.mazecrypto.app.data.Maze.walletData.value
+            val progress = com.mazecrypto.app.data.MoneroSync.progress.value
+            return com.mazecrypto.app.data.Maze.wallets.value.map { w ->
+                val st = data[w.id]
+                val value = if (w.manual) w.amount?.let { a -> prices[w.coinId]?.let { a * it } }
+                    else st?.balance?.assets?.let { a -> if (a.isEmpty()) 0.0 else a.sumOf { x -> x.amount * (prices[x.coinId] ?: 0.0) } }
+                val state = when {
+                    progress[w.id]?.phase == "back" -> "history:" + progress[w.id]!!.ts
+                    progress[w.id] != null -> "syncing:" + (progress[w.id]!!.fraction * 100).toInt()
+                    st?.error != null -> "error"
+                    w.manual -> "manual"
+                    else -> "ok"
+                }
+                WWallet(com.mazecrypto.app.ui.screens.walletTitle(w), w.chain, w.device, value, state, w.inPortfolio,
+                    if (w.address.isEmpty()) "" else com.mazecrypto.app.ui.screens.walletRef(w))
+            }.sortedByDescending { it.value ?: -1.0 }
         }
 
         /** Keep the shape, drop most of the 168 hourly points: a widget row is ~40 dp wide. */
@@ -203,6 +240,9 @@ data class WidgetData(
                 change = s.widgetChange, private = s.widgetPrivate, coins = coins,
                 favorites = s.widgetCoins().map { it.id }, portfolio = portfolio,
                 plan = planOf(profile, sum),
+                trend = if (snap == null) previous?.trend ?: emptyList()
+                    else downsample(com.mazecrypto.app.core.portfolioTrend(sum, snap.rows.associate { it.coin.id to it.spark }), 84),
+                wallets = runCatching { walletsOf() }.getOrElse { previous?.wallets ?: emptyList() },
             )
         }
     }

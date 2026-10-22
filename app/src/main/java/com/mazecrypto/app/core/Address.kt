@@ -20,12 +20,17 @@ object Address {
         data class Ok(val address: String, val chains: List<String>) : Result
         /** A secret: "seed", "private_key" or "xprv". Never store, never send, clear the field. */
         data class Secret(val kind: String) : Result
-        /** Not usable: "empty", "xpub", "testnet", "checksum" or "unknown". */
+        /**
+         * A watch-only HD account (xpub / ypub / zpub / Ltub / Mtub). [script] is null when the
+         * version does not say (a plain xpub can be BIP-44 legacy or BIP-86 Taproot): ask.
+         */
+        data class Account(val xpub: String, val chains: List<String>, val script: String?) : Result
+        /** Not usable: "empty", "testnet", "checksum" or "unknown". */
         data class Bad(val reason: String) : Result
     }
 
     /** Networks that use Ethereum-style 0x addresses; Hyperliquid (HyperCore + HyperEVM) included. */
-    val EVM_CHAINS = listOf("ethereum", "base", "arbitrum", "optimism", "polygon", "hyperliquid")
+    val EVM_CHAINS = listOf("ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "hyperliquid")
 
     private val SCHEMES = setOf("bitcoin", "litecoin", "ethereum", "solana", "tron", "monero")
     private val HEX40 = Regex("^0x[0-9a-fA-F]{40}$")
@@ -76,7 +81,12 @@ object Address {
         if (s.isEmpty() || s.length > 120 || s.any { it.isWhitespace() }) return Result.Bad("unknown")
         val lower = s.lowercase()
 
-        if (listOf("xpub", "ypub", "zpub", "tpub", "upub", "vpub", "ltub", "mtub").any { lower.startsWith(it) }) return Result.Bad("xpub")
+        if (listOf("tpub", "upub", "vpub").any { lower.startsWith(it) }) return Result.Bad("testnet")
+        if (listOf("xpub", "ypub", "zpub", "ltub", "mtub").any { lower.startsWith(it) }) {
+            val k = Hd.parse(s) ?: return Result.Bad("checksum")
+            val kind = Hd.kindOf(k.version) ?: return Result.Bad("unknown")
+            return Result.Account(s, kind.chains, kind.script)
+        }
 
         // EVM: 0x + 40 hex. Mixed case must carry a valid EIP-55 checksum.
         if (HEX40.matches(s)) {
@@ -208,6 +218,31 @@ object Base58 {
     // Monero splits data into 8-byte blocks of 11 characters; a short last block uses fewer.
     private val BLOCK_CHARS = intArrayOf(0, 2, 3, 5, 6, 7, 9, 10, 11)
 
+    fun encodeMonero(data: ByteArray): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < data.size) {
+            val n = minOf(8, data.size - i)
+            var v = BigInteger(1, data.copyOfRange(i, i + n))
+            val chars = CharArray(BLOCK_CHARS[n]) { ALPHABET[0] }
+            var k = chars.size - 1
+            while (v.signum() > 0 && k >= 0) {
+                val qr = v.divideAndRemainder(B58)
+                chars[k--] = ALPHABET[qr[1].toInt()]
+                v = qr[0]
+            }
+            sb.append(chars)
+            i += n
+        }
+        return sb.toString()
+    }
+
+    /** A standard (primary) Monero address from its two public keys. */
+    fun moneroAddress(spendPub: ByteArray, viewPub: ByteArray): String {
+        val body = byteArrayOf(18) + spendPub + viewPub
+        return encodeMonero(body + Keccak.k256(body).copyOfRange(0, 4))
+    }
+
     fun decodeMonero(s: String): ByteArray? {
         val out = java.io.ByteArrayOutputStream()
         var i = 0
@@ -250,6 +285,26 @@ object Bech32 {
 
     private fun expand(hrp: String): IntArray =
         (hrp.map { it.code shr 5 } + 0 + hrp.map { it.code and 31 }).toIntArray()
+
+    /** Encode a witness program (v0 → bech32, v1+ → bech32m). */
+    fun encodeSegwit(hrp: String, version: Int, program: ByteArray): String {
+        val data = mutableListOf(version)
+        var acc = 0
+        var bits = 0
+        for (b in program) {
+            acc = (acc shl 8) or (b.toInt() and 0xff)
+            bits += 8
+            while (bits >= 5) {
+                bits -= 5
+                data += (acc shr bits) and 31
+            }
+        }
+        if (bits > 0) data += (acc shl (5 - bits)) and 31
+        val const = if (version == 0) 1 else BECH32M
+        val pm = polymod(expand(hrp) + data.toIntArray() + IntArray(6)) xor const
+        val chk = (0 until 6).map { (pm shr (5 * (5 - it))) and 31 }
+        return hrp + "1" + (data + chk).joinToString("") { CHARSET[it].toString() }
+    }
 
     /** A lowercase segwit address for [hrp]: right checksum flavour, witness version and program length. */
     fun segwitOk(addr: String, hrp: String): Boolean {

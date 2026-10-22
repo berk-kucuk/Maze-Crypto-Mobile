@@ -208,3 +208,33 @@ fun splitContribution(amount: Double, values: Map<String, Double>, targets: Map<
     if (dsum <= EPS) return targets.mapValues { (_, tg) -> amount * tg / tsum }
     return deficit.filterValues { it > EPS }.mapValues { (_, d) -> amount * d / dsum }
 }
+
+/**
+ * The portfolio's value over the last seven days at today's amounts: each
+ * holding follows its coin's hourly price line ([sparks], any currency — only
+ * the shape is used, scaled so the last point is today's value). Holdings with
+ * no price line count as flat. Empty when nothing moves.
+ */
+fun portfolioTrend(sum: Summary, sparks: Map<String, List<Double>>, points: Int = 84): List<Double> {
+    if (sum.holdings.isEmpty() || points < 2) return emptyList()
+    val out = DoubleArray(points)
+    var moving = false
+    for (h in sum.holdings) {
+        val v = h.valueFiat ?: continue
+        val s = sparks[h.position.coinId]?.filter { it > 0 && it.isFinite() }
+        if (s == null || s.size < 2) {
+            for (i in out.indices) out[i] += v
+            continue
+        }
+        moving = true
+        val last = s.last()
+        for (i in 0 until points) {
+            val x = i.toDouble() * (s.size - 1) / (points - 1)
+            val lo = x.toInt().coerceIn(0, s.size - 1)
+            val hi = minOf(lo + 1, s.size - 1)
+            val f = x - lo
+            out[i] += v * (s[lo] * (1 - f) + s[hi] * f) / last
+        }
+    }
+    return if (moving) out.toList() else emptyList()
+}

@@ -129,6 +129,8 @@ fun Context.pinWidget(kind: String): Boolean {
         "movers" -> com.mazecrypto.app.widget.MoversWidget::class.java
         "holdings" -> com.mazecrypto.app.widget.HoldingsWidget::class.java
         "plan" -> com.mazecrypto.app.widget.PlanWidget::class.java
+        "trend" -> com.mazecrypto.app.widget.TrendWidget::class.java
+        "wallets" -> com.mazecrypto.app.widget.WalletsWidget::class.java
         else -> FavoritesWidget::class.java
     }
     return runCatching { mgr.requestPinAppWidget(ComponentName(this, cls), null, null) }.getOrDefault(false)
@@ -141,3 +143,20 @@ fun greeting(): String {
 
 @Composable
 fun Gap(h: Int = 12) = Spacer(Modifier.height(h.dp))
+
+/**
+ * While shown, the screen cannot be captured (screenshots, recording, the
+ * recent-apps thumbnail) — for screens where a key is typed. Restores the
+ * user's own setting when it goes away.
+ */
+@Composable
+fun SecureScreen() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val w = (ctx as? android.app.Activity)?.window
+        w?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose {
+            if (!Maze.settings.value.secureScreen) w?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+}

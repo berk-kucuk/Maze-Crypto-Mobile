@@ -4,8 +4,13 @@
         <exclude domain="file" path="widget.json" />
         <!-- Watched addresses reveal holdings and history: phone-to-phone transfer only. -->
         <exclude domain="file" path="wallets.json" />
+        <exclude domain="file" path="secrets.json" />
+        <exclude domain="file" path="monero" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="widget.json" />
+        <!-- The Keystore key that seals them does not move to the new phone. -->
+        <exclude domain="file" path="secrets.json" />
+        <exclude domain="file" path="monero" />
     </device-transfer>
 </data-extraction-rules>

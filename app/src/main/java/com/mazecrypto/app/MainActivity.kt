@@ -3,6 +3,7 @@ package com.mazecrypto.app
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -21,6 +22,9 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         Maze.init(this)
+        // Tapjacking: ignore touches while another app draws over this window.
+        window.decorView.filterTouchesWhenObscured = true
+        if (Maze.settings.value.secureScreen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (savedInstanceState == null) nav.deepLink(intent?.data)
         setContent { MazeApp(nav) }
     }

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Portfolio chart: value, today's change, and the last seven days at today's amounts. Hand-written. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:paddingHorizontal="12dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="8dp">
+<LinearLayout
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+<TextView android:id="@+id/t_label" style="@style/WidgetText.Title"
+    android:layout_width="0dp"
+    android:layout_weight="1"
+    android:layout_height="wrap_content" />
+<TextView android:id="@+id/w_updated" style="@style/WidgetText.Dim"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content" />
+</LinearLayout>
+<LinearLayout
+    android:orientation="horizontal"
+    android:gravity="bottom"
+    android:layout_marginTop="2dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+<TextView android:id="@+id/t_value" style="@style/WidgetText.Big"
+    android:layout_width="0dp"
+    android:layout_weight="1"
+    android:layout_height="wrap_content" />
+<TextView android:id="@+id/t_day" style="@style/WidgetText.Change"
+    android:layout_marginStart="6dp"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content" />
+</LinearLayout>
+<ImageView android:id="@+id/t_chart"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
+    android:layout_marginTop="6dp"
+    android:scaleType="fitXY"
+    android:contentDescription="@null" />
+<LinearLayout
+    android:orientation="horizontal"
+    android:layout_marginTop="4dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+<TextView android:id="@+id/t_range" style="@style/WidgetText.Dim"
+    android:layout_width="0dp"
+    android:layout_weight="1"
+    android:layout_height="wrap_content" />
+<TextView android:id="@+id/t_week" style="@style/WidgetText.Change.Small"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content" />
+</LinearLayout>
+</LinearLayout>

@@ -3,12 +3,15 @@ package com.mazecrypto.app.data
 import com.mazecrypto.app.core.Address
 import com.mazecrypto.app.core.Asset
 import com.mazecrypto.app.core.Coin
+import com.mazecrypto.app.core.Hd
 import com.mazecrypto.app.core.Leg
 import com.mazecrypto.app.core.Transfer
 import com.mazecrypto.app.core.Wallet
 import com.mazecrypto.app.core.WalletBalance
 import com.mazecrypto.app.core.optDoubleOrNull
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigDecimal
@@ -50,11 +53,16 @@ object Chains {
         ChainInfo("optimism", "OP Mainnet", ETH, 18, "https://optimistic.etherscan.io/address/{a}", "https://optimistic.etherscan.io/tx/{t}"),
         ChainInfo("polygon", "Polygon", Coin("polygon-ecosystem-token", "POL", "POL (ex-MATIC)"), 18,
             "https://polygonscan.com/address/{a}", "https://polygonscan.com/tx/{t}"),
+        ChainInfo("bsc", "BNB Chain", Coin("binancecoin", "BNB", "BNB"), 18, "https://bscscan.com/address/{a}", "https://bscscan.com/tx/{t}"),
+        ChainInfo("avalanche", "Avalanche C-Chain", Coin("avalanche-2", "AVAX", "Avalanche"), 18,
+            "https://snowtrace.io/address/{a}", "https://snowtrace.io/tx/{t}"),
         // Spot, perp margin and staked HYPE on HyperCore plus HYPE on HyperEVM, as one balance.
         ChainInfo("hyperliquid", "Hyperliquid", Coin("hyperliquid", "HYPE", "Hyperliquid"), 18,
             "https://app.hyperliquid.xyz/explorer/address/{a}", "https://app.hyperliquid.xyz/explorer/tx/{t}", activity = true),
-        // Monero balances cannot be read from an address — that is the point of Monero.
-        ChainInfo("monero", "Monero", Coin("monero", "XMR", "Monero"), 12, manual = true),
+        // Monero balances cannot be read from an address — that is the point of Monero. A view-only
+        // wallet (address + private view key) is scanned on the phone over Tor; otherwise the user enters it.
+        ChainInfo("monero", "Monero", Coin("monero", "XMR", "Monero"), 12, explorerTx = "https://xmrchain.net/tx/{t}",
+            activity = true, manual = true),
         ChainInfo("manual", "Manual", null, 8, manual = true),
     )
     private val BY_ID = ALL.associateBy { it.id }
@@ -76,6 +84,10 @@ object Chains {
         KnownToken("optimism", "0x0b2c639c533813f4aa9d7837caf62653d097ff85", USDC, 6),
         KnownToken("polygon", "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", USDC, 6),
         KnownToken("polygon", "0xc2132d05d31c914a87c6611c10748aeb04b58e8f", USDT, 6),
+        KnownToken("bsc", "0x55d398326f99059ff775485246999027b3197955", USDT, 18),
+        KnownToken("bsc", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", USDC, 18),
+        KnownToken("avalanche", "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e", USDC, 6),
+        KnownToken("avalanche", "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7", USDT, 6),
         KnownToken("solana", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", USDC, 6),
         KnownToken("solana", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", USDT, 6),
         KnownToken("solana", "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", Coin("jupiter-exchange-solana", "JUP", "Jupiter"), 6),
@@ -145,7 +157,8 @@ class WalletService(private val http: Http, private val cache: Cache) {
     }
 
     suspend fun balance(w: Wallet, ttl: Double, cacheOnly: Boolean = false): Fetched<WalletBalance> {
-        val f = cachedText("w:bal:${Address.key(w.chain, w.address)}", ttl, cacheOnly) { fetchBalance(w).toJson() }
+        val t = if (w.account) maxOf(ttl, TTL_ACCOUNT) else ttl
+        val f = cachedText("w:bal:${Address.key(w.chain, w.address)}", t, cacheOnly) { fetchBalance(w).toJson() }
         return Fetched(WalletBalance.fromJson(f.value), f.staleAge, f.error)
     }
 
@@ -156,7 +169,13 @@ class WalletService(private val http: Http, private val cache: Cache) {
         return Fetched(Transfer.listFromJson(f.value).map { it.copy(walletIds = setOf(w.id)) }, f.staleAge, f.error)
     }
 
-    private suspend fun fetchBalance(w: Wallet): WalletBalance = when (w.chain) {
+    private suspend fun fetchBalance(w: Wallet): WalletBalance = when {
+        w.account -> accountBalance(w)
+        w.moneroView -> throw NotSupported("monero view wallets sync in MoneroSync")
+        else -> fetchAddressBalance(w)
+    }
+
+    private suspend fun fetchAddressBalance(w: Wallet): WalletBalance = when (w.chain) {
         "bitcoin", "litecoin" -> esploraBalance(w)
         "ethereum" -> try {
             blockscoutBalance(w)
@@ -164,14 +183,14 @@ class WalletService(private val http: Http, private val cache: Cache) {
             if (e is CancellationException) throw e
             rpcBalance(w)       // the indexer is down or throttled: native + known tokens from a node
         }
-        "base", "arbitrum", "optimism", "polygon" -> rpcBalance(w)
+        "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche" -> rpcBalance(w)
         "solana" -> solanaBalance(w)
         "tron" -> tronBalance(w)
         "hyperliquid" -> hyperliquidBalance(w)
         else -> throw NotSupported(w.chain)
     }
 
-    private suspend fun fetchActivity(w: Wallet): List<Transfer> = when (w.chain) {
+    private suspend fun fetchActivity(w: Wallet): List<Transfer> = if (w.account) accountActivity(w) else when (w.chain) {
         "bitcoin", "litecoin" -> esploraActivity(w)
         "ethereum" -> blockscoutActivity(w)
         "solana" -> solanaActivity(w)
@@ -284,6 +303,113 @@ class WalletService(private val http: Http, private val cache: Cache) {
                 )
             }.getOrNull()
         }
+    }
+
+    // ── Bitcoin / Litecoin HD accounts (xpub) ─────────────────────────────────
+
+    /** One derived address and what Esplora knows about it. */
+    private class HdAddr(val address: String, val change: Int, val index: Int, val txs: Int, val confirmed: Long, val pending: Long)
+
+    /**
+     * Walk the receive (0) and change (1) branches until [GAP_RECEIVE] / [GAP_CHANGE]
+     * unused addresses in a row — the gap limit wallets (and Ledger Live) use, so
+     * every address the account has ever handed out is found.
+     */
+    private suspend fun scanAccount(w: Wallet): List<HdAddr> = coroutineScope {
+        val key = Hd.parse(w.address) ?: throw ValidationError("extended public key")
+        suspend fun branch(change: Int, gap: Int): List<HdAddr> {
+            val out = mutableListOf<HdAddr>()
+            var unused = 0
+            var i = 0
+            val node = key.child(change) ?: return out
+            while (unused < gap && i < MAX_HD_INDEX) {
+                val k = node.child(i)
+                if (k != null) {
+                    val a = Hd.address(k.pub, w.chain, w.script)
+                    val o = esplora(w) { base -> http.getObject("$base/address/$a") }
+                    val ch = o.getJSONObject("chain_stats")
+                    val mem = o.optJSONObject("mempool_stats") ?: JSONObject()
+                    fun net(x: JSONObject) = V.number(x.opt("funded_txo_sum")).toLong() - V.number(x.opt("spent_txo_sum"), allowNegative = true).toLong()
+                    val txs = ch.optInt("tx_count") + mem.optInt("tx_count")
+                    out += HdAddr(a, change, i, txs, net(ch), net(mem))
+                    if (txs == 0) unused++ else unused = 0
+                }
+                i++
+            }
+            return out
+        }
+        val recv = async { branch(0, GAP_RECEIVE) }
+        val chg = async { branch(1, GAP_CHANGE) }
+        recv.await() + chg.await()
+    }
+
+    private suspend fun accountBalance(w: Wallet): WalletBalance {
+        val addrs = scanAccount(w)
+        val coin = native(w)
+        val confirmed = addrs.sumOf { it.confirmed } / 1e8
+        val pending = addrs.sumOf { it.pending } / 1e8
+        // The next unused receive address is what the user would hand out now: remember it for the screen.
+        val next = addrs.firstOrNull { it.change == 0 && it.txs == 0 }?.address ?: ""
+        cache.put("w:hd:${w.address}", JSONObject().put("used", JSONArray(addrs.filter { it.txs > 0 }.map { it.address }))
+            .put("next", next).put("n", addrs.count { it.txs > 0 }).toString())
+        return WalletBalance(
+            listOf(Asset(coin.id, coin.symbol, coin.name, maxOf(0.0, confirmed + pending), pending = pending)),
+            System.currentTimeMillis(), addrs.sumOf { it.txs },
+        )
+    }
+
+    /** How many transactions an address has seen (Bitcoin/Litecoin), for account discovery. */
+    suspend fun addressTxCount(chain: String, address: String): Int {
+        val w = Wallet("probe", chain, address)
+        return esplora(w) { base ->
+            val o = http.getObject("$base/address/$address")
+            o.getJSONObject("chain_stats").optInt("tx_count") + (o.optJSONObject("mempool_stats")?.optInt("tx_count") ?: 0)
+        }
+    }
+
+    /** The next unused receive address and how many addresses have been used, from the last scan. */
+    fun accountInfo(w: Wallet): Pair<String, Int>? {
+        val (_, v) = cache.stale("w:hd:${w.address}") ?: return null
+        return runCatching { JSONObject(v).let { it.optString("next") to it.optInt("n") } }.getOrNull()
+    }
+
+    private suspend fun accountActivity(w: Wallet): List<Transfer> {
+        val used = runCatching {
+            JSONObject(cache.stale("w:hd:${w.address}")?.second ?: "{}").optJSONArray("used")
+        }.getOrNull()?.let { a -> (0 until a.length()).map { a.getString(it) } }
+            ?: scanAccount(w).filter { it.txs > 0 }.map { it.address }
+        val mine = used.toSet()
+        val coin = native(w)
+        val txs = LinkedHashMap<String, JSONObject>()
+        for (a in used.take(MAX_HD_HISTORY_ADDRESSES)) {
+            esplora(w) { base -> http.getArray("$base/address/$a/txs") }.objects().forEach { tx -> txs.putIfAbsent(tx.optString("txid"), tx) }
+        }
+        return txs.values.mapNotNull { tx ->
+            runCatching {
+                var received = 0L
+                var spent = 0L
+                var from = ""
+                var to = ""
+                tx.optJSONArray("vin")?.objects()?.forEach { vin ->
+                    val prev = vin.optJSONObject("prevout") ?: return@forEach
+                    val a = prev.optString("scriptpubkey_address")
+                    if (a in mine) spent += V.number(prev.opt("value")).toLong() else if (from.isEmpty()) from = a
+                }
+                tx.optJSONArray("vout")?.objects()?.forEach { out ->
+                    val a = out.optString("scriptpubkey_address")
+                    if (a in mine) received += V.number(out.opt("value")).toLong() else if (to.isEmpty() && a.isNotEmpty()) to = a
+                }
+                val status = tx.optJSONObject("status")
+                val confirmed = status?.optBoolean("confirmed") == true
+                val delta = (received - spent) / 1e8
+                Transfer(
+                    w.chain, tx.getString("txid").take(80), if (confirmed) status!!.optLong("block_time") else 0L,
+                    if (confirmed) "ok" else "pending", listOf(Leg(coin.id, coin.symbol, delta)),
+                    fee = if (spent > 0) V.number(tx.opt("fee")) / 1e8 else null, feeSymbol = coin.symbol, feeIncluded = true,
+                    counterparty = if (delta < 0) to else from,
+                )
+            }.getOrNull()
+        }.sortedWith(compareBy<Transfer> { it.ts != 0L }.thenByDescending { it.ts }).take(50)
     }
 
     // ── Ethereum: Blockscout (balances, tokens, history) ─────────────────────
@@ -716,6 +842,12 @@ class WalletService(private val http: Http, private val cache: Cache) {
 
     companion object {
         const val TTL_ACTIVITY = 300.0
+        /** HD accounts take one lookup per address: refresh them less often than single addresses. */
+        const val TTL_ACCOUNT = 300.0
+        const val GAP_RECEIVE = 20
+        const val GAP_CHANGE = 10
+        const val MAX_HD_INDEX = 1000
+        const val MAX_HD_HISTORY_ADDRESSES = 20
         const val DUST_USD = 0.01
         const val MAX_TOKEN_LOOKUPS = 100
         const val MIN_MARKET_CAP_USD = 1_000_000.0
@@ -736,8 +868,10 @@ class WalletService(private val http: Http, private val cache: Cache) {
             "arbitrum" to listOf("https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc", "https://arbitrum.drpc.org"),
             "optimism" to listOf("https://optimism-rpc.publicnode.com", "https://mainnet.optimism.io", "https://optimism.drpc.org"),
             "polygon" to listOf("https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org"),
+            "bsc" to listOf("https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org", "https://bsc.drpc.org"),
+            "avalanche" to listOf("https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc", "https://avalanche.drpc.org"),
         )
-        private val EVM_CHAIN_ID = mapOf("ethereum" to 1L, "base" to 8453L, "arbitrum" to 42161L, "optimism" to 10L, "polygon" to 137L)
+        private val EVM_CHAIN_ID = mapOf("ethereum" to 1L, "base" to 8453L, "arbitrum" to 42161L, "optimism" to 10L, "polygon" to 137L, "bsc" to 56L, "avalanche" to 43114L)
         private val SOLANA_RPC = listOf("https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com")
         private val SPL_PROGRAMS = listOf("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
         private const val JUPITER = "https://lite-api.jup.ag"
@@ -759,6 +893,8 @@ class WalletService(private val http: Http, private val cache: Cache) {
             "optimism-rpc.publicnode.com" to 0.2, "polygon-bor-rpc.publicnode.com" to 0.2,
             "1rpc.io" to 0.3, "mainnet.base.org" to 0.3, "arb1.arbitrum.io" to 0.3, "mainnet.optimism.io" to 0.3,
             "eth.drpc.org" to 0.3, "base.drpc.org" to 0.3, "arbitrum.drpc.org" to 0.3, "optimism.drpc.org" to 0.3, "polygon.drpc.org" to 0.3,
+            "bsc-rpc.publicnode.com" to 0.2, "bsc-dataseed.bnbchain.org" to 0.3, "bsc.drpc.org" to 0.3,
+            "avalanche-c-chain-rpc.publicnode.com" to 0.2, "api.avax.network" to 0.3, "avalanche.drpc.org" to 0.3,
             "api.mainnet-beta.solana.com" to 0.35, "solana-rpc.publicnode.com" to 0.35, "lite-api.jup.ag" to 1.0,
             "api.trongrid.io" to 0.5, "api.hyperliquid.xyz" to 0.3, "rpc.hyperliquid.xyz" to 0.3,
         )

@@ -102,7 +102,8 @@ fun PortfolioScreen(nav: Nav, startTab: String) {
             if (profile.trades.isNotEmpty() || sum.holdings.isNotEmpty()) {
             Glass(Modifier.fillMaxWidth()) {
                 Text(t("home.value"), style = Type.cardTitle, color = p.textMid)
-                Text(if (sum.holdings.isEmpty()) Fmt.DASH else Fmt.money(sum.valueFiat, fiat), style = Type.big, color = p.text)
+                Text(if (sum.holdings.isEmpty()) Fmt.DASH else if (Maze.settings.value.hideAmounts) MASK
+                    else Fmt.money(sum.valueFiat, fiat, if (sum.valueFiat >= 1000) 0 else 2), style = Type.big, color = p.text, maxLines = 1)
                 if (profile.trades.isNotEmpty()) {
                 Gap(10)
                 Row {

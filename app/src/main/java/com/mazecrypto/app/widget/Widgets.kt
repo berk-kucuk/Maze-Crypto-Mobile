@@ -115,6 +115,8 @@ object Widgets {
         PortfolioWidget::class.java to ::portfolio,
         HoldingsWidget::class.java to ::holdings,
         PlanWidget::class.java to ::plan,
+        TrendWidget::class.java to ::trend,
+        WalletsWidget::class.java to ::wallets,
     )
 
     fun hasAny(ctx: Context): Boolean {
@@ -736,9 +738,91 @@ object Widgets {
             v
         }
     }
+
+    // ── portfolio chart ────────────────────────────────────────────────────
+
+    fun trend(ctx: Context, id: Int, d: WidgetData?): RemoteViews {
+        val v = RemoteViews(ctx.packageName, R.layout.widget_trend)
+        v.setOnClickPendingIntent(android.R.id.background, openApp(ctx, "mazecrypto://home", 20))
+        v.setTextViewText(R.id.t_label, t("widget.portfolio"))
+        v.updated(ctx, d)
+        val p = d?.portfolio
+        if (d == null || p == null) {
+            v.setTextViewText(R.id.t_value, Fmt.DASH)
+            v.setTextViewText(R.id.t_day, "")
+            v.setTextViewText(R.id.t_range, if (d == null) t("widget.empty_nodata") else t("widget.no_trades"))
+            v.setTextViewText(R.id.t_week, "")
+            return v
+        }
+        v.setTextViewText(R.id.t_value, if (d.private) "••••••" else Fmt.money(p.value, d.fiat, if (p.value >= 1000) 0 else 2))
+        v.setTextViewText(R.id.t_day, pct(p.dayPct))
+        v.setTextColor(R.id.t_day, WC.change(p.dayPct))
+        v.setTextViewText(R.id.t_range, t("widget.trend_range"))
+        if (d.trend.size > 1) {
+            spark(ctx, d.trend, 300, 90)?.let { v.setImageViewBitmap(R.id.t_chart, it) }
+            val ch = (d.trend.last() / d.trend.first() - 1) * 100
+            v.setTextViewText(R.id.t_week, pct(ch))
+            v.setTextColor(R.id.t_week, WC.change(ch))
+        } else {
+            v.setTextViewText(R.id.t_week, "")
+        }
+        return v
+    }
+
+    // ── wallets ────────────────────────────────────────────────────────────
+
+    private val WL_ROWS = intArrayOf(R.id.wl_row0, R.id.wl_row1, R.id.wl_row2, R.id.wl_row3, R.id.wl_row4)
+    private val WL_NAMES = intArrayOf(R.id.wl_name0, R.id.wl_name1, R.id.wl_name2, R.id.wl_name3, R.id.wl_name4)
+    private val WL_SUBS = intArrayOf(R.id.wl_sub0, R.id.wl_sub1, R.id.wl_sub2, R.id.wl_sub3, R.id.wl_sub4)
+    private val WL_VALS = intArrayOf(R.id.wl_val0, R.id.wl_val1, R.id.wl_val2, R.id.wl_val3, R.id.wl_val4)
+
+    fun wallets(ctx: Context, id: Int, d: WidgetData?): RemoteViews {
+        val v = RemoteViews(ctx.packageName, R.layout.widget_wallets)
+        v.setOnClickPendingIntent(android.R.id.background, openApp(ctx, "mazecrypto://portfolio/wallets", 21))
+        v.setTextViewText(R.id.wl_label, t("widget.wallets"))
+        v.updated(ctx, d)
+        val list = d?.wallets.orEmpty()
+        // How many rows fit: the launcher reports the height it gave the widget.
+        val opts = AppWidgetManager.getInstance(ctx).getAppWidgetOptions(id)
+        val hDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 180)
+        val fit = ((hDp - 62) / 34).coerceIn(1, WL_ROWS.size)
+        if (d == null || list.isEmpty()) {
+            v.setTextViewText(R.id.wl_total, Fmt.DASH)
+            v.setViewVisibility(R.id.wl_empty, View.VISIBLE)
+            v.setTextViewText(R.id.wl_empty, t("widget.wallets_empty"))
+            WL_ROWS.forEach { v.setViewVisibility(it, View.GONE) }
+            return v
+        }
+        v.setViewVisibility(R.id.wl_empty, View.GONE)
+        val total = list.filter { it.inPortfolio }.sumOf { it.value ?: 0.0 }
+        v.setTextViewText(R.id.wl_total, if (d.private) "••••••" else Fmt.money(total, d.fiat, 0))
+        WL_ROWS.forEachIndexed { i, row ->
+            val w = list.getOrNull(i)
+            if (w == null || i >= fit) { v.setViewVisibility(row, View.GONE); return@forEachIndexed }
+            v.setViewVisibility(row, View.VISIBLE)
+            v.setTextViewText(WL_NAMES[i], w.title)
+            val chain = com.mazecrypto.app.data.Chains.of(w.chain)?.name ?: w.chain
+            val state = when {
+                w.state.startsWith("syncing:") -> t("m.xmr.scanning", "pct" to w.state.removePrefix("syncing:"))
+                w.state.startsWith("history:") -> t("m.xmr.history_to", "date" to (w.state.removePrefix("history:").toLongOrNull()?.let { Fmt.date(it) } ?: ""))
+                w.state == "error" -> t("m.wal.failed")
+                else -> null
+            }
+            val first = if (w.title == chain) w.ref.ifEmpty { null } else chain
+            v.setTextViewText(WL_SUBS[i], listOfNotNull(first, if (w.device == "ledger") "Ledger" else null, state).joinToString(" · "))
+            v.setTextColor(WL_SUBS[i], if (w.state == "error") WC.WARN else WC.DIM)
+            v.setTextViewText(WL_VALS[i], if (d.private) "•••" else Fmt.moneyShort(w.value, d.fiat))
+        }
+        return v
+    }
 }
 
 // ── providers ───────────────────────────────────────────────────────────────
+
+class TrendWidget : MazeWidget()
+
+class WalletsWidget : MazeWidget()
+
 
 abstract class MazeWidget : AppWidgetProvider() {
     /**

@@ -10,6 +10,16 @@
     <!-- Lets the periodic widget refresh survive a reboot (JobInfo.setPersisted). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Ledger: USB (OTG) and Bluetooth LE. Optional hardware; asked for only on the Ledger screen.
+         Bluetooth is used to talk to a Ledger, never to find where the phone is. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <application
         android:name=".MazeApp"
         android:allowBackup="true"
@@ -90,6 +100,20 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_plan_info" />
+        </receiver>
+
+        <receiver android:name=".widget.TrendWidget" android:exported="true" android:label="@string/widget_trend_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_trend_info" />
+        </receiver>
+
+        <receiver android:name=".widget.WalletsWidget" android:exported="true" android:label="@string/widget_wallets_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_wallets_info" />
         </receiver>
 
         <receiver android:name=".widget.WidgetRefreshReceiver" android:exported="false" />

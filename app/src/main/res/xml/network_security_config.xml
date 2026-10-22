@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- HTTPS only. The HTTP layer additionally refuses any host that is not on its allow-list. -->
+<!-- HTTPS only. The HTTP layer additionally refuses any host that is not on its allow-list.
+     The one exception: Monero nodes reached as Tor onion services speak plain HTTP —
+     the onion circuit itself is end-to-end encrypted and authenticates the node. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">onion</domain>
+    </domain-config>
 </network-security-config>

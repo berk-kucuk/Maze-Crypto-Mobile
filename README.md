@@ -35,6 +35,22 @@ ff:26:25:aa:48:fe:2a:1c:56:87:a0:bb:71:18:6e:e5:b6:e3:ff:e4:71:be:8d:19:9f:59:b3
 If an update refuses to install with a signature error, the file did not come
 from this project — do not force it by uninstalling first.
 
+## Ledger, accounts and Monero
+
+* **Ledger** (Portfolio → Wallets → Ledger): over USB-C/OTG or Bluetooth (Nano X,
+  Stax, Flex). Tick every coin you want — BTC, ETH and its networks (incl. BNB
+  Chain, Avalanche), SOL, TRX, XMR, LTC — and one connection reads them all; the
+  app opens each coin's app on the device, you only confirm. Public keys only.
+* **HD accounts**: paste an xpub / ypub / zpub / Ltub and the whole account is
+  followed (every receive and change address).
+* **Monero view-only**: primary address + private view key (or exported from a
+  Ledger), scanned on the phone. **Only over Tor**: install Orbot, start it, and
+  check Settings → Tor (default `127.0.0.1 : 9050`). Blocks come from community
+  onion nodes; the view key is sealed by the Android Keystore and never leaves
+  the phone. No start date is needed: recent payments show up first, then the
+  history is read backwards (Wi‑Fi only unless allowed in Settings) and can be
+  stopped once the balance is complete. Spends are recognised by the change they return.
+
 ## Widgets
 
 Star coins in **Prices** (or during setup) and they appear on the widgets.

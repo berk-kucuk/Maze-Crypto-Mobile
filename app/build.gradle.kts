@@ -30,8 +30,8 @@ android {
         minSdk = 26
         targetSdk = 37
         // Must never go backwards or repeat.
-        versionCode = 4
-        versionName = "0.5.1"
+        versionCode = 12
+        versionName = "0.7.4"
     }
 
     signingConfigs {
@@ -93,6 +93,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.bouncycastle)
 
     testImplementation(libs.junit)
     testImplementation(libs.json)

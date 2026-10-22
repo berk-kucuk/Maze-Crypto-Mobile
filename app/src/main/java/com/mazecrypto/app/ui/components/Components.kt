@@ -98,12 +98,14 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing: (@Compos
 @Composable
 fun PageHeader(title: String, sub: String? = null, actions: @Composable RowScope.() -> Unit = {}) {
     val p = LocalPalette.current
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = Type.pageTitle, color = p.text)
-            if (sub != null) Text(sub, style = Type.pageSub, color = p.textMid, modifier = Modifier.padding(top = 2.dp))
+    // Title and actions share a row; the subtitle gets the full width below, so it never wraps against the actions.
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = Type.pageTitle, color = p.text, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            actions()
         }
-        actions()
+        if (sub != null) Text(sub, style = Type.pageSub, color = p.textMid, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
@@ -263,6 +265,7 @@ fun Field(
     keyboard: KeyboardOptions? = null,
     textStyle: TextStyle? = null,
     trailing: (@Composable () -> Unit)? = null,
+    visual: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
 ) {
     val p = LocalPalette.current
     OutlinedTextField(
@@ -274,6 +277,7 @@ fun Field(
         textStyle = (textStyle ?: Type.body).copy(color = p.text, fontFeatureSettings = if (number) "tnum" else null),
         keyboardOptions = keyboard ?: if (number) KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
         trailingIcon = trailing,
+        visualTransformation = visual,
         shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = p.accent.copy(alpha = 0.6f), unfocusedBorderColor = p.glassLine,

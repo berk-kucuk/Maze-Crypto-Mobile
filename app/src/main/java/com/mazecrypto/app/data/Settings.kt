@@ -33,6 +33,20 @@ data class Settings(
     val widgetChange: String = "24h",
     /** Hide money amounts on the portfolio widget (percentages only). */
     val widgetPrivate: Boolean = false,
+    /**
+     * Monero always goes through Tor: the SOCKS5 port of Orbot (or any Tor client) on
+     * this host and port. There is no clearnet fallback.
+     */
+    val torHost: String = "127.0.0.1",
+    val torPort: Int = 9050,
+    /** A Monero node (host:port, an .onion address or https://…); "" = Maze's list of onion nodes. */
+    val moneroNode: String = "",
+    /** Mask every money amount in the app (shoulder-surfing, screen sharing); toggled from the dashboard. */
+    val hideAmounts: Boolean = false,
+    /** Block screenshots, screen recording and the recent-apps thumbnail for the whole app. */
+    val secureScreen: Boolean = false,
+    /** Read old Monero history on mobile data too (it can be gigabytes); off = Wi-Fi only. */
+    val moneroMobileData: Boolean = false,
 ) {
     /** Favorites that are still on the watchlist; the first coins of the watchlist if none are starred. */
     fun widgetCoins(): List<Coin> {
@@ -58,6 +72,9 @@ data class Settings(
         if (s.chartInterval !in INTERVALS) s = s.copy(chartInterval = "1d")
         if (s.accent !in ACCENTS) s = s.copy(accent = "champagne")
         if (s.widgetChange !in listOf("1h", "24h", "7d")) s = s.copy(widgetChange = "24h")
+        if (s.torPort !in 1..65535) s = s.copy(torPort = 9050)
+        if (s.torHost.isBlank() || s.torHost.length > 253 || s.torHost.any { it.isWhitespace() || it == '/' }) s = s.copy(torHost = "127.0.0.1")
+        if (s.moneroNode.length > 200) s = s.copy(moneroNode = "")
         return s
     }
 
@@ -69,6 +86,8 @@ data class Settings(
         put("expert", expert); put("accent", accent)
         put("proxy", JSONObject().put("enabled", proxyEnabled).put("url", proxyUrl))
         put("widget_change", widgetChange); put("widget_private", widgetPrivate)
+        put("tor", JSONObject().put("host", torHost).put("port", torPort)); put("monero_node", moneroNode)
+        put("hide_amounts", hideAmounts); put("secure_screen", secureScreen); put("monero_mobile_data", moneroMobileData)
         put("watchlist", JSONArray().apply { watchlist.forEach { put(it.toJson()) } })
     }
 
@@ -107,6 +126,12 @@ data class Settings(
                 proxyUrl = proxy.optString("url", d.proxyUrl),
                 widgetChange = o.optString("widget_change", d.widgetChange),
                 widgetPrivate = o.optBoolean("widget_private", false),
+                torHost = o.optJSONObject("tor")?.optString("host", d.torHost) ?: d.torHost,
+                torPort = o.optJSONObject("tor")?.optInt("port", d.torPort) ?: d.torPort,
+                moneroNode = o.optString("monero_node", ""),
+                hideAmounts = o.optBoolean("hide_amounts", false),
+                secureScreen = o.optBoolean("secure_screen", false),
+                moneroMobileData = o.optBoolean("monero_mobile_data", false),
             ).validated()
         }
 

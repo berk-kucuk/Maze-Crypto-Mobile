@@ -6,4 +6,7 @@
     <exclude domain="file" path="widget.json" />
     <!-- Watched addresses reveal holdings and history to whoever reads the backup: never in the cloud. -->
     <exclude domain="file" path="wallets.json" />
+    <!-- Sealed Monero view keys and scan state: device-bound, useless anywhere else. -->
+    <exclude domain="file" path="secrets.json" />
+    <exclude domain="file" path="monero" />
 </full-backup-content>

@@ -86,7 +86,7 @@ class WalletTest {
         assertEquals(Address.Result.Secret("private_key"), Address.parse("KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617"))
         assertEquals(Address.Result.Secret("xprv"), Address.parse("xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"))
         assertEquals(Address.Result.Secret("private_key"), Address.parse("[" + (1..64).joinToString(",") + "]"))
-        assertEquals(Address.Result.Bad("xpub"), Address.parse("xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8"))
+        assertTrue(Address.parse("xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8") is Address.Result.Account)
         assertFalse(Address.parse("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh") is Address.Result.Secret)
     }
 
@@ -126,5 +126,17 @@ class WalletTest {
         val utxo = Transfer("bitcoin", "x", 5, "ok", listOf(Leg("bitcoin", "BTC", -0.0001)), fee = 0.0001, feeIncluded = true)
         assertEquals("self", utxo.direction)
         assertTrue(Transfer("bitcoin", "y", 5, "ok", listOf(Leg("bitcoin", "BTC", -0.5)), fee = 0.0001, feeIncluded = true).direction == "out")
+    }
+
+    @org.junit.Test
+    fun hdAccounts() {
+        // BIP-84 / BIP-86 test vectors ("abandon … about").
+        val zpub = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
+        val k = com.mazecrypto.app.core.Hd.parse(zpub)!!
+        assertEquals("bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu", com.mazecrypto.app.core.Hd.address(k, "bitcoin", "wpkh", 0, 0))
+        assertEquals("bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el", com.mazecrypto.app.core.Hd.address(k, "bitcoin", "wpkh", 1, 0))
+        val xpub = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ"
+        assertEquals("bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
+            com.mazecrypto.app.core.Hd.address(com.mazecrypto.app.core.Hd.parse(xpub)!!, "bitcoin", "tr", 0, 0))
     }
 }

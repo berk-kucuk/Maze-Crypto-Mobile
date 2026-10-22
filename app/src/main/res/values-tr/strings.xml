@@ -16,4 +16,8 @@
     <string name="widget_hold_description">Her varlık: portföydeki payı, değeri ve kâr/zararı</string>
     <string name="widget_plan_label">Alım planı</string>
     <string name="widget_plan_description">Sıradaki planlı alımın, ne zaman olduğu ve ilerleme</string>
+    <string name="widget_trend_label">Portföy grafiği</string>
+    <string name="widget_trend_description">Portföy değeri ve son yedi günü grafikle</string>
+    <string name="widget_wallets_label">Cüzdanlar</string>
+    <string name="widget_wallets_description">Cüzdanlarının toplamı ve her biri: Ledger hesapları, Monero taraması</string>
 </resources>

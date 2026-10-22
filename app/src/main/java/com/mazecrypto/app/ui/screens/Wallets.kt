@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,12 +44,19 @@ import com.mazecrypto.app.R
 import com.mazecrypto.app.core.Address
 import com.mazecrypto.app.core.Coin
 import com.mazecrypto.app.core.Fmt
+import com.mazecrypto.app.core.Hd
 import com.mazecrypto.app.core.Transfer
 import com.mazecrypto.app.core.Wallet
 import com.mazecrypto.app.core.isSyntheticCoin
 import com.mazecrypto.app.core.t
 import com.mazecrypto.app.data.Chains
 import com.mazecrypto.app.data.Maze
+import com.mazecrypto.app.data.MoneroSync
+import com.mazecrypto.app.monero.Ed
+import com.mazecrypto.app.monero.ViewWallet
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.mazecrypto.app.data.WalletStore
 import com.mazecrypto.app.ui.Nav
 import com.mazecrypto.app.ui.Route
@@ -97,6 +105,8 @@ private fun walletValue(w: Wallet, st: Maze.WalletStatus?, prices: Map<String, D
 }
 
 fun Context.openLink(url: String) {
+    // Explorer links are built from data that came over the network: only plain https leaves the app.
+    if (!url.startsWith("https://") || url.any { it.isWhitespace() || it.isISOControl() }) return
     runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         .onFailure { Toast.makeText(this, t("m.wal.no_browser"), Toast.LENGTH_SHORT).show() }
 }
@@ -127,6 +137,24 @@ private fun ChainDot(chain: String) {
     Badge(Chains.of(chain)?.let { if (it.id == "manual") t("m.wal.manual_short") else it.name } ?: chain, p.textMid)
 }
 
+/** Chain, plus what kind of wallet: an HD account, a Ledger, a view-only Monero wallet. */
+@Composable
+private fun WalletBadges(w: Wallet) {
+    val p = LocalPalette.current
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        ChainDot(w.chain)
+        if (w.device == "ledger") Badge("Ledger", p.accent)
+        if (w.account) Badge(scriptName(w.script), p.textMid)
+        if (w.moneroView) Badge(t("m.xmr.view_badge"), p.accent)
+    }
+}
+
+/** What to show for a wallet's address in a row: accounts by their type, not a 111-character key. */
+fun walletRef(w: Wallet): String = when {
+    w.account -> t("m.wal.account_short") + (w.path.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
+    else -> Address.short(w.address)
+}
+
 // ── Portfolio → Wallets tab ────────────────────────────────────────────────
 
 @Composable
@@ -139,18 +167,26 @@ fun WalletsTab(nav: Nav, fiat: String) {
 
     if (wallets.isEmpty()) {
         EmptyState(R.drawable.ic_wallet, t("m.wal.empty_t"), t("m.wal.empty_b")) {
-            PrimaryButton(t("m.wal.add"), icon = R.drawable.ic_plus) { nav.go(Route.WalletEdit()) }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                PrimaryButton(t("m.wal.add"), icon = R.drawable.ic_plus) { nav.go(Route.WalletEdit()) }
+                Gap(8)
+                GhostButton(t("m.ledger.connect"), icon = R.drawable.ic_usb) { nav.go(Route.Ledger) }
+            }
         }
         Gap(12)
         SecurityNote()
         return
     }
 
+    if (wallets.any { it.moneroView && data[it.id]?.torMissing == true }) {
+        TorRequired(nav)
+        Gap(12)
+    }
     val counted = wallets.filter { it.inPortfolio }
     val total = counted.sumOf { walletValue(it, data[it.id], prices) ?: 0.0 }
     Glass(Modifier.fillMaxWidth()) {
         Text(t("m.wal.total"), style = Type.cardTitle, color = p.textMid)
-        Text(Fmt.money(total, fiat), style = Type.big, color = p.text, maxLines = 1)
+        Text(if (Maze.settings.value.hideAmounts) MASK else Fmt.money(total, fiat, if (total >= 1000) 0 else 2), style = Type.big, color = p.text, maxLines = 1)
         val failing = wallets.count { data[it.id]?.error != null }
         Text(
             listOfNotNull(
@@ -169,7 +205,10 @@ fun WalletsTab(nav: Nav, fiat: String) {
         }
     }
     Gap(10)
-    GhostButton(t("m.wal.add"), Modifier.fillMaxWidth(), icon = R.drawable.ic_plus) { nav.go(Route.WalletEdit()) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        GhostButton(t("m.wal.add"), Modifier.weight(1f), icon = R.drawable.ic_plus) { nav.go(Route.WalletEdit()) }
+        GhostButton("Ledger", Modifier.weight(1f), icon = R.drawable.ic_usb) { nav.go(Route.Ledger) }
+    }
 
     SectionTitle(t("m.wal.activity"))
     ActivityBlock(nav, fiat, wallets.map { it.id }, limit = 20)
@@ -185,8 +224,8 @@ private fun WalletRow(w: Wallet, st: Maze.WalletStatus?, prices: Map<String, Dou
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(walletTitle(w), style = Type.strong, color = p.text, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                Spacer(Modifier.width(6.dp))
-                ChainDot(w.chain)
+                if (walletTitle(w) != Chains.of(w.chain)?.name) { Spacer(Modifier.width(6.dp)); ChainDot(w.chain) }
+                if (w.device == "ledger") { Spacer(Modifier.width(4.dp)); Badge("Ledger", p.accent) }
             }
             val sub = when {
                 w.manual -> listOfNotNull(Fmt.amount(w.amount) + " " + w.symbol, w.address.takeIf { it.isNotEmpty() }?.let { Address.short(it) })
@@ -195,14 +234,18 @@ private fun WalletRow(w: Wallet, st: Maze.WalletStatus?, prices: Map<String, Dou
                     val assets = st?.balance?.assets?.filter { it.amount > 0 } ?: emptyList()
                     val main = assets.firstOrNull()?.let { Fmt.amount(it.amount) + " " + it.symbol }
                     val more = if (assets.size > 1) t("m.wal.more_assets", "n" to assets.size - 1) else null
-                    listOfNotNull(Address.short(w.address), main, more).joinToString(" · ")
+                    listOfNotNull(walletRef(w), main, more).joinToString(" · ")
                 }
             }
             Text(sub, style = Type.small, color = p.muted, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(Fmt.money(walletValue(w, st, prices), fiat), style = Type.num, color = if (w.inPortfolio) p.text else p.textMid, maxLines = 1)
+            val xmr = MoneroSync.progress.collectAsStateWithLifecycle().value[w.id]
             val state = when {
+                st?.torMissing == true -> t("m.xmr.tor_needed") to p.warn
+                xmr != null && xmr.phase == "back" -> t("m.xmr.history_to", "date" to Fmt.date(xmr.ts)) to p.accent
+                xmr != null -> t("m.xmr.scanning", "pct" to (xmr.fraction * 100).toInt().toString()) to p.accent
                 st?.loading == true -> t("status.updating") to p.accent
                 st?.error != null && st.balance == null -> t("m.wal.failed") to p.down
                 st?.error != null -> t("m.wal.stale", "age" to Fmt.age((now - st.balance!!.ts) / 1000.0)) to p.warn
@@ -248,7 +291,7 @@ private fun ActivityBlock(nav: Nav, fiat: String, ids: List<String>, limit: Int)
         errors = e
     }
     val wallets by Maze.wallets.collectAsStateWithLifecycle()
-    val readable = wallets.filter { it.id in ids && Chains.of(it.chain)?.activity == true }
+    val readable = wallets.filter { it.id in ids && !it.manual && Chains.of(it.chain)?.activity == true }
     val l = list
     when {
         readable.isEmpty() -> Glass(Modifier.fillMaxWidth()) {
@@ -267,6 +310,9 @@ private fun ActivityBlock(nav: Nav, fiat: String, ids: List<String>, limit: Int)
                 }
             }
             Text(t("m.wal.history_note"), style = Type.small, color = p.muted, modifier = Modifier.padding(top = 6.dp, start = 2.dp))
+            if (l.take(limit).any { isDust(it) }) {
+                Text(t("m.wal.dust_note"), style = Type.small, color = p.warn, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
+            }
         }
     }
     if (errors.isNotEmpty() && !l.isNullOrEmpty()) {
@@ -297,6 +343,10 @@ private fun TransferRow(tr: Transfer, fiat: String, prices: Map<String, Double>,
                     Spacer(Modifier.width(6.dp))
                     Badge(t(if (tr.status == "pending") "m.wal.pending" else "m.wal.failed_tx"), if (tr.status == "pending") p.warn else p.down)
                 }
+                if (isDust(tr)) {
+                    Spacer(Modifier.width(6.dp))
+                    Badge(t("m.wal.dust"), p.warn)
+                }
             }
             val cp = tr.counterparty.takeIf { it.isNotEmpty() && dir != "self" }?.let {
                 t(if (dir == "in") "m.wal.from" else "m.wal.to", "who" to Address.short(it))
@@ -323,6 +373,14 @@ private fun TransferRow(tr: Transfer, fiat: String, prices: Map<String, Double>,
         }
     }
 }
+
+/**
+ * A tiny unsolicited receipt on a UTXO chain: the classic dust attack. Spending
+ * it together with other coins links the addresses, so it is flagged.
+ */
+private fun isDust(tr: Transfer): Boolean =
+    (tr.chain == "bitcoin" || tr.chain == "litecoin") && tr.direction == "in" &&
+        tr.legs.size == 1 && tr.legs[0].amount in 0.0..0.00001
 
 // ── one wallet ────────────────────────────────────────────────────────────
 
@@ -354,7 +412,7 @@ fun WalletDetailScreen(nav: Nav, id: String) {
         Gap(6)
         Glass(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ChainDot(w.chain)
+                WalletBadges(w)
                 if (!w.inPortfolio) { Spacer(Modifier.width(6.dp)); Badge(t("m.wal.watch_only"), p.muted) }
                 Spacer(Modifier.weight(1f))
                 if (w.manual) Text(t("m.wal.manual_short"), style = Type.small, color = p.muted)
@@ -367,14 +425,17 @@ fun WalletDetailScreen(nav: Nav, id: String) {
             Gap(8)
             Text(t("home.value"), style = Type.cardTitle, color = p.textMid)
             Text(Fmt.money(walletValue(w, st, prices), fiat), style = Type.big, color = p.text, maxLines = 1)
+            if (w.moneroView && st?.torMissing == true) { Gap(10); TorRequired(nav) }
+            if (w.moneroView) MoneroStatus(w)
+            if (w.account) AccountInfo(w)
             if (w.address.isNotEmpty()) {
                 Gap(10)
-                Text(t("m.wal.address"), style = Type.small, color = p.muted)
+                Text(if (w.account) t("m.wal.account_key") else t("m.wal.address"), style = Type.small, color = p.muted)
                 SelectionContainer { Text(w.address, style = Mono, color = p.text, modifier = Modifier.padding(top = 2.dp)) }
                 Gap(8)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GhostButton(t("m.wal.copy"), Modifier.weight(1f), icon = R.drawable.ic_copy) { ctx.copyText(t("m.wal.address"), w.address) }
-                    Chains.explorerUrl(w.chain, w.address)?.let { url ->
+                    Chains.explorerUrl(w.chain, w.address)?.takeIf { !w.account }?.let { url ->
                         GhostButton(t("m.wal.explorer"), Modifier.weight(1f), icon = R.drawable.ic_arrow_square_out) { ctx.openLink(url) }
                     }
                 }
@@ -421,7 +482,7 @@ fun WalletDetailScreen(nav: Nav, id: String) {
 
         SectionTitle(t("m.wal.activity"))
         when {
-            w.chain == "monero" -> Glass(Modifier.fillMaxWidth()) { Text(t("m.wal.xmr_note"), style = Type.bodySmall, color = p.textMid) }
+            w.chain == "monero" && w.manual -> Glass(Modifier.fillMaxWidth()) { Text(t("m.wal.xmr_note"), style = Type.bodySmall, color = p.textMid) }
             w.manual -> Glass(Modifier.fillMaxWidth()) { Text(t("m.wal.manual_note"), style = Type.bodySmall, color = p.textMid) }
             info?.activity != true -> Glass(Modifier.fillMaxWidth()) {
                 Text(t("m.wal.no_history_chain_one", "chain" to (info?.name ?: w.chain)), style = Type.bodySmall, color = p.textMid)
@@ -439,40 +500,139 @@ fun WalletDetailScreen(nav: Nav, id: String) {
     }
 }
 
+@Composable
+private fun AccountInfo(w: Wallet) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val data by Maze.walletData.collectAsStateWithLifecycle()
+    val info = remember(data[w.id]?.balance?.ts) { Maze.service().wallets.accountInfo(w) }
+    Gap(10)
+    if (w.path.isNotEmpty()) KeyValue(t("m.wal.path"), w.path)
+    info?.let { (next, used) ->
+        KeyValue(t("m.wal.used_addresses"), used.toString(), Modifier.padding(top = 4.dp))
+        if (next.isNotEmpty()) {
+            Gap(8)
+            Text(t("m.wal.next_address"), style = Type.small, color = p.muted)
+            SelectionContainer { Text(next, style = Mono, color = p.text, modifier = Modifier.padding(top = 2.dp)) }
+            GhostButton(t("m.wal.copy"), Modifier.padding(top = 6.dp), icon = R.drawable.ic_copy) { ctx.copyText(t("m.wal.address"), next) }
+            if (w.device == "ledger") Text(t("m.wal.verify_hint"), style = Type.small, color = p.muted, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+@Composable
+private fun MoneroStatus(w: Wallet) {
+    val p = LocalPalette.current
+    val prog = MoneroSync.progress.collectAsStateWithLifecycle().value[w.id]
+    val data by Maze.walletData.collectAsStateWithLifecycle()
+    var tick by remember { mutableStateOf(0) }
+    val st = remember(data[w.id]?.balance?.ts, prog?.height, tick) { MoneroSync.state(w.id) }
+    Gap(10)
+    when {
+        prog != null && prog.phase == "back" ->
+            Text(t("m.xmr.history_running", "date" to Fmt.date(prog.ts)), style = Type.small, color = p.accent)
+        prog != null -> {
+            Text(t("m.xmr.scanning_long", "h" to prog.height.toString(), "tip" to prog.tip.toString()), style = Type.small, color = p.accent)
+            com.mazecrypto.app.ui.components.Progress(prog.fraction, Modifier.fillMaxWidth().padding(vertical = 6.dp))
+        }
+        st != null && st.next > 0 -> KeyValue(t("m.xmr.scanned_to"), st.next.toString())
+    }
+    prog?.let { Text(t("m.xmr.via", "node" to Address.short(it.node, 10, 6)), style = Type.small, color = p.muted, modifier = Modifier.padding(top = 2.dp)) }
+    if (w.restoreHeight > 0) {
+        KeyValue(t("m.xmr.restore_height"), w.restoreHeight.toString(), Modifier.padding(top = 4.dp))
+    } else if (st != null && st.low > 0) {
+        // No start date: history is read backwards from the day the wallet was added.
+        val found = st.outputs.size
+        Text(
+            when {
+                st.backDone && st.floor > 1 -> t("m.xmr.history_stopped", "date" to Fmt.date(st.lowTs), "n" to found)
+                st.backDone -> t("m.xmr.history_done", "n" to found)
+                else -> t("m.xmr.history_so_far", "date" to Fmt.date(st.lowTs), "n" to found)
+            },
+            style = Type.small, color = p.textMid, modifier = Modifier.padding(top = 6.dp),
+        )
+        Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!st.backDone) LinkButton(t("m.xmr.history_stop"), arrow = false) { MoneroSync.setHistory(w.id, resume = false); tick++ }
+            else if (st.floor > 1) LinkButton(t("m.xmr.history_resume"), arrow = false) {
+                MoneroSync.setHistory(w.id, resume = true); tick++; Maze.syncMoneroAsync(force = true)
+            }
+        }
+        if (!st.backDone && !Maze.settings.value.moneroMobileData) {
+            Text(t("m.xmr.history_wifi"), style = Type.small, color = p.muted)
+        }
+    }
+    Text(t("m.xmr.view_b"), style = Type.small, color = p.muted, modifier = Modifier.padding(top = 6.dp))
+}
+
 // ── add / edit ────────────────────────────────────────────────────────────
+
+/** "Native SegWit", "Taproot" … for an HD account's script. */
+fun scriptName(script: String): String = t("m.wal.script_" + script.replace("-", "_"))
 
 @Composable
 fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
     val p = LocalPalette.current
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val existing = remember(id) { id?.let { i -> Maze.wallets.value.firstOrNull { it.id == i } } }
     val preset = remember(presetCoin) { presetCoin?.let { c -> Maze.trackedCoins().firstOrNull { it.id == c } } }
     val presetChains = remember(presetCoin) { presetCoin?.let { Chains.forCoin(it) } }
-    val startManual = existing?.manual ?: (presetChains?.all { it == "manual" || it == "monero" } == true)
+    val startMode = when {
+        existing?.moneroView == true -> "address"
+        existing?.manual == true -> "manual"
+        presetCoin == "monero" -> "monero"
+        presetChains?.all { it == "manual" } == true -> "manual"
+        else -> "address"
+    }
 
-    var mode by remember { mutableStateOf(if (startManual) "manual" else "address") }
+    var mode by remember { mutableStateOf(startMode) }
     var input by remember { mutableStateOf(existing?.address ?: "") }
     var label by remember { mutableStateOf(existing?.label ?: "") }
     var chosen by remember { mutableStateOf(existing?.let { setOf(it.chain) } ?: emptySet()) }
+    var script by remember { mutableStateOf<String?>(null) }
     var coin by remember {
         mutableStateOf(existing?.takeIf { it.manual && it.coinId.isNotEmpty() }?.let { Coin(it.coinId, it.symbol, it.name.ifEmpty { it.symbol }) }
-            ?: preset?.takeIf { startManual })
+            ?: preset?.takeIf { startMode == "manual" })
     }
     var amount by remember { mutableStateOf(existing?.amount?.let { plain(it) } ?: "") }
     var inPortfolio by remember { mutableStateOf(existing?.inPortfolio ?: true) }
     var error by remember { mutableStateOf<String?>(null) }
     var secret by remember { mutableStateOf<String?>(null) }
     var pickCoin by remember { mutableStateOf(false) }
+    // Monero view-only.
+    var xmrAddr by remember { mutableStateOf("") }
+    var viewKey by remember { mutableStateOf("") }
+    var showKey by remember { mutableStateOf(false) }
+    var restore by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
 
     val parsed = remember(input) { if (input.isBlank()) null else Address.parse(input) }
     // Which networks the address can be on, narrowed to the coin when the editor was opened from one.
-    val options = (parsed as? Address.Result.Ok)?.chains?.let { cs ->
+    val rawChains = when (val r = parsed) {
+        is Address.Result.Ok -> r.chains
+        is Address.Result.Account -> r.chains
+        else -> null
+    }
+    val options = rawChains?.let { cs ->
         val forCoin = presetChains?.let { pc -> cs.filter { it in pc } }
         if (forCoin.isNullOrEmpty()) cs else forCoin
     } ?: emptyList()
     val multi = options.size > 1 && options.all { it in Address.EVM_CHAINS }
+    val account = parsed as? Address.Result.Account
+    val accountChain = chosen.firstOrNull { it in options } ?: options.firstOrNull()
+    val scriptOptions = when {
+        account == null -> emptyList()
+        account.script != null -> listOf(account.script)
+        accountChain == "litecoin" -> listOf("pkh")
+        else -> listOf("pkh", "tr")
+    }
+    val firstAddress = remember(account, accountChain, script) {
+        val k = account?.let { Hd.parse(it.xpub) }
+        val sc = script
+        if (k != null && accountChain != null && sc != null) runCatching { Hd.address(k, accountChain, sc, 0, 0) }.getOrNull() else null
+    }
 
-    // Keep the selection valid for what was pasted; a Monero address belongs in the manual form.
+    // Keep the selection valid for what was pasted; a Monero address belongs in the Monero form.
     LaunchedEffect(parsed) {
         when (val r = parsed) {
             is Address.Result.Secret -> {
@@ -480,15 +640,17 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
                 input = ""
                 secret = r.kind
             }
-            is Address.Result.Ok -> {
+            is Address.Result.Ok, is Address.Result.Account -> {
                 secret = null
                 if (existing == null) {
-                    if (r.chains == listOf("monero")) {
-                        mode = "manual"
-                        coin = coin ?: Coin("monero", "XMR", "Monero")
+                    if (r is Address.Result.Ok && r.chains == listOf("monero")) {
+                        xmrAddr = r.address
+                        input = ""
+                        mode = "monero"
                     } else if (chosen.none { it in options }) {
                         chosen = setOf(options.first())
                     }
+                    if (r is Address.Result.Account) script = r.script ?: script?.takeIf { it in scriptOptions } ?: scriptOptions.firstOrNull()
                 }
             }
             else -> {}
@@ -512,8 +674,44 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
         error = null
     }
 
+    fun restoreHeight(): Long? {
+        val r = restore.trim()
+        if (r.isEmpty()) return null
+        r.toLongOrNull()?.let { return it.takeIf { h -> h in 1..100_000_000 } }
+        return runCatching {
+            MoneroSync.heightAt(java.time.LocalDate.parse(r).atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond())
+        }.getOrNull()
+    }
+
+    fun saveMonero() {
+        val addr = Address.clean(xmrAddr)
+        if ((Address.parse(addr) as? Address.Result.Ok)?.chains != listOf("monero")) { error = t("m.wal.bad_not_xmr"); return }
+        // Empty = unknown: read history backwards from today instead.
+        val h = if (restore.isBlank()) 0L else restoreHeight() ?: run { error = t("m.xmr.err_restore"); return }
+        val key = viewKey.trim().lowercase()
+        busy = true
+        scope.launch {
+            val problem = withContext(Dispatchers.Default) { ViewWallet.check(addr, key) }
+            busy = false
+            if (problem == "spend_key") {
+                ctx.clearClipboardIf(viewKey)
+                viewKey = ""
+                secret = "spend_key"
+                return@launch
+            }
+            if (problem != null) { error = t("m.xmr.key_$problem"); return@launch }
+            ctx.clearClipboardIf(viewKey)
+            val w = Wallet(WalletStore.newId(), "monero", addr, label.trim().filter { !it.isISOControl() }.take(40), "monero", "XMR", "Monero",
+                inPortfolio = inPortfolio, created = System.currentTimeMillis() / 1000, view = true, restoreHeight = h)
+            withContext(Dispatchers.IO) { MoneroSync.saveViewKey(w.id, Ed.hex(key)) }
+            viewKey = ""
+            error = Maze.addWallets(listOf(w))
+            if (error == null) nav.back() else MoneroSync.forget(w.id)
+        }
+    }
+
     SubScreen(nav, if (existing == null) t("m.wal.add") else t("m.wal.edit"), footer = {
-        PrimaryButton(t("btn.save"), Modifier.fillMaxWidth(), icon = R.drawable.ic_check) {
+        PrimaryButton(if (busy) t("m.xmr.checking") else t("btn.save"), Modifier.fillMaxWidth(), icon = R.drawable.ic_check, enabled = !busy) {
             error = null
             val now = System.currentTimeMillis() / 1000
             val lbl = label.trim().filter { !it.isISOControl() }.take(40)
@@ -522,6 +720,7 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
                 nav.back()
                 return@PrimaryButton
             }
+            if (mode == "monero") { saveMonero(); return@PrimaryButton }
             if (mode == "manual") {
                 val c = coin ?: run { error = t("trade.err_coin"); return@PrimaryButton }
                 val a = Fmt.parseOrNull(amount)
@@ -532,6 +731,7 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
                     when (val r = Address.parse(ref)) {
                         is Address.Result.Secret -> { ctx.clearClipboardIf(ref); input = ""; secret = r.kind; return@PrimaryButton }
                         is Address.Result.Ok -> ref = r.address
+                        is Address.Result.Account -> ref = r.xpub
                         is Address.Result.Bad -> if (c.id == "monero") { error = reason(r); return@PrimaryButton } else ref = ref.take(120)
                     }
                     if (c.id == "monero" && (Address.parse(ref) as? Address.Result.Ok)?.chains != listOf("monero")) {
@@ -554,6 +754,12 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
                 null -> error = t("m.wal.bad_empty")
                 is Address.Result.Secret -> secret = r.kind
                 is Address.Result.Bad -> error = reason(r)
+                is Address.Result.Account -> {
+                    val ch = accountChain ?: run { error = t("m.wal.pick_network"); return@PrimaryButton }
+                    val sc = script ?: run { error = t("m.wal.pick_script"); return@PrimaryButton }
+                    error = Maze.addWallets(listOf(Wallet(WalletStore.newId(), ch, r.xpub, lbl, inPortfolio = inPortfolio, created = now, script = sc)))
+                    if (error == null) nav.back()
+                }
                 is Address.Result.Ok -> {
                     val chains = chosen.filter { it in options }
                     if (chains.isEmpty()) { error = t("m.wal.pick_network"); return@PrimaryButton }
@@ -566,8 +772,22 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
     }) {
         Gap(6)
         if (existing == null) {
-            Segmented(listOf("address" to t("m.wal.mode_address"), "manual" to t("m.wal.mode_manual")), mode) { mode = it; error = null }
+            Segmented(listOf("address" to t("m.wal.mode_address"), "monero" to "Monero", "manual" to t("m.wal.mode_manual")), mode) { mode = it; error = null }
             Gap(10)
+            if (mode == "address") {
+                Glass(Modifier.fillMaxWidth(), onClick = { nav.go(Route.Ledger) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Ic(R.drawable.ic_usb, tint = p.accent, size = 20.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(t("m.ledger.cta_t"), style = Type.strong, color = p.text)
+                            Text(t("m.ledger.cta_b"), style = Type.small, color = p.textMid)
+                        }
+                        Ic(R.drawable.ic_caret_right, tint = p.muted, size = 16.dp)
+                    }
+                }
+                Gap(10)
+            }
         }
 
         secret?.let { kind ->
@@ -587,8 +807,8 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
 
         val addrKeyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false,
             keyboardType = KeyboardType.Uri)
-        if (mode == "address") {
-            if (existing != null) {
+        when (mode) {
+            "address" -> if (existing != null) {
                 Glass(Modifier.fillMaxWidth()) {
                     ChainDot(existing.chain)
                     Gap(6)
@@ -601,6 +821,7 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
                     supporting = when (val r = parsed) {
                         is Address.Result.Bad -> reason(r)
                         is Address.Result.Ok -> t("m.wal.valid", "a" to Address.short(r.address, 8, 6))
+                        is Address.Result.Account -> t("m.wal.valid_account")
                         else -> t("m.wal.address_help")
                     },
                     trailing = { IconBtn(R.drawable.ic_clipboard_text) { secret = null; input = ctx.pasteText().take(400) } })
@@ -616,25 +837,69 @@ fun WalletEditor(nav: Nav, id: String?, presetCoin: String?) {
                         }
                     }
                     val sel = chosen.filter { it in options }
-                    if (sel.any { Chains.of(it)?.activity == false }) {
+                    if (account == null && sel.any { Chains.of(it)?.activity == false }) {
                         Text(t("m.wal.l2_note"), style = Type.small, color = p.muted, modifier = Modifier.padding(top = 6.dp))
                     }
                 }
+                if (account != null) {
+                    Gap(10)
+                    Text(t("m.wal.script"), style = Type.small, color = p.muted)
+                    Gap(6)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        scriptOptions.forEach { sc -> Chip(scriptName(sc), sc == script) { script = sc } }
+                    }
+                    Gap(8)
+                    Glass(Modifier.fillMaxWidth()) {
+                        Text(t("m.wal.account_t"), style = Type.strong, color = p.text)
+                        Text(t("m.wal.account_b"), style = Type.bodySmall, color = p.textMid, modifier = Modifier.padding(top = 2.dp))
+                        firstAddress?.let {
+                            Gap(8)
+                            Text(t("m.wal.first_address"), style = Type.small, color = p.muted)
+                            Text(it, style = Mono, color = p.text, modifier = Modifier.padding(top = 2.dp))
+                        }
+                    }
+                }
             }
-        } else {
-            Glass(Modifier.fillMaxWidth(), padding = 12.dp) {
-                ValueRow(t("trade.coin"), coin?.let { "${it.symbol} · ${it.name}" } ?: t("search.pick")) { pickCoin = true }
+            "monero" -> {
+                SecureScreen()
+                TorLive(nav)
+                Gap(10)
+                Field(xmrAddr, { xmrAddr = it.take(120); error = null }, t("m.xmr.address"), placeholder = t("m.wal.xmr_ph"),
+                    keyboard = addrKeyboard, textStyle = Mono, supporting = t("m.xmr.address_help"),
+                    trailing = { IconBtn(R.drawable.ic_clipboard_text) { xmrAddr = Address.clean(ctx.pasteText()).take(120) } })
+                Gap(8)
+                Field(viewKey, { v -> viewKey = v.filter { !it.isWhitespace() }.take(64); error = null; secret = null }, t("m.xmr.view_key"),
+                    keyboard = addrKeyboard, textStyle = Mono, supporting = t("m.xmr.view_key_help"),
+                    visual = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    trailing = {
+                        Row {
+                            IconBtn(R.drawable.ic_eye_slash) { showKey = !showKey }
+                            IconBtn(R.drawable.ic_clipboard_text) { viewKey = ctx.pasteText().filter { !it.isWhitespace() }.take(64); secret = null }
+                        }
+                    })
+                Gap(8)
+                RestoreChooser(restore) { restore = it; error = null }
+                Gap(10)
+                Glass(Modifier.fillMaxWidth()) {
+                    Text(t("m.xmr.view_t"), style = Type.strong, color = p.text)
+                    Text(t("m.xmr.view_b"), style = Type.bodySmall, color = p.textMid, modifier = Modifier.padding(top = 2.dp))
+                }
             }
-            Gap(10)
-            Field(amount, { amount = it; error = null }, t("trade.amount"), number = true,
-                supporting = coin?.let { c -> Fmt.parseOrNull(amount)?.let { a -> Maze.prices().first[c.id]?.let { Fmt.money(a * it, Maze.settings.value.fiat) } } })
-            Gap(8)
-            Field(input, { accept(it) }, t(if (coin?.id == "monero") "m.wal.address" else "m.wal.reference"),
-                placeholder = if (coin?.id == "monero") t("m.wal.xmr_ph") else t("m.wal.reference_ph"), keyboard = addrKeyboard,
-                textStyle = Mono, supporting = t("m.wal.reference_help"))
-            Gap(8)
-            Glass(Modifier.fillMaxWidth()) {
-                Text(if (coin?.id == "monero") t("m.wal.xmr_note") else t("m.wal.manual_note"), style = Type.bodySmall, color = p.textMid)
+            else -> {
+                Glass(Modifier.fillMaxWidth(), padding = 12.dp) {
+                    ValueRow(t("trade.coin"), coin?.let { "${it.symbol} · ${it.name}" } ?: t("search.pick")) { pickCoin = true }
+                }
+                Gap(10)
+                Field(amount, { amount = it; error = null }, t("trade.amount"), number = true,
+                    supporting = coin?.let { c -> Fmt.parseOrNull(amount)?.let { a -> Maze.prices().first[c.id]?.let { Fmt.money(a * it, Maze.settings.value.fiat) } } })
+                Gap(8)
+                Field(input, { accept(it) }, t(if (coin?.id == "monero") "m.wal.address" else "m.wal.reference"),
+                    placeholder = if (coin?.id == "monero") t("m.wal.xmr_ph") else t("m.wal.reference_ph"), keyboard = addrKeyboard,
+                    textStyle = Mono, supporting = t("m.wal.reference_help"))
+                Gap(8)
+                Glass(Modifier.fillMaxWidth()) {
+                    Text(if (coin?.id == "monero") t("m.wal.xmr_note") else t("m.wal.manual_note"), style = Type.bodySmall, color = p.textMid)
+                }
             }
         }
         Gap(10)
@@ -694,5 +959,97 @@ fun CoinWallets(nav: Nav, coinId: String, fiat: String) {
     if (holding.size > 1) {
         val total = holding.sumOf { it.second }
         KeyValue(t("m.wal.coin_total"), Fmt.amount(total), Modifier.padding(top = 8.dp, start = 2.dp))
+    }
+}
+
+/**
+ * When a Monero wallet started: optional. Empty = unknown, history is read
+ * backwards from today. A date (or height) makes the first scan much shorter.
+ */
+@Composable
+fun RestoreChooser(value: String, onChange: (String) -> Unit) {
+    val p = LocalPalette.current
+    val today = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+    Text(t("m.xmr.restore_q"), style = Type.small, color = p.muted)
+    Gap(6)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip(t("m.xmr.restore_unknown"), value.isBlank()) { onChange("") }
+        Chip(t("m.xmr.new_wallet"), value == today.toString()) { onChange(today.toString()) }
+        listOf(1L to "m.xmr.restore_1m", 6L to "m.xmr.restore_6m", 12L to "m.xmr.restore_1y").forEach { (months, key) ->
+            val d = today.minusMonths(months).toString()
+            Chip(t(key), value == d) { onChange(d) }
+        }
+    }
+    Gap(8)
+    val h = value.trim().takeIf { it.isNotEmpty() }?.let { r ->
+        r.toLongOrNull()?.takeIf { it in 1..100_000_000 }
+            ?: runCatching { MoneroSync.heightAt(java.time.LocalDate.parse(r).atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond()) }.getOrNull()
+    }
+    Field(value, { onChange(it.take(12)) }, t("m.xmr.restore"), placeholder = t("m.xmr.restore_unknown_ph"),
+        error = value.isNotBlank() && h == null,
+        supporting = when {
+            value.isBlank() -> t("m.xmr.restore_auto")
+            h == null -> t("m.xmr.err_restore")
+            else -> t("m.xmr.restore_from", "h" to h.toString())
+        })
+}
+
+/** Monero only syncs over Tor: what to do when Orbot is not running. */
+@Composable
+fun TorRequired(nav: Nav) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val s = Maze.settings.value
+    Glass(Modifier.fillMaxWidth(), tint = p.warn) {
+        Row {
+            Ic(R.drawable.ic_warning, tint = p.warn, size = 18.dp)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(t("m.xmr.tor_required_t"), style = Type.strong, color = p.text)
+                Text(t("m.xmr.tor_required_b", "host" to s.torHost, "port" to s.torPort.toString()), style = Type.bodySmall,
+                    color = p.textMid, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
+        Gap(10)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GhostButton(t("m.xmr.open_orbot"), Modifier.weight(1f)) { ctx.openOrbot() }
+            GhostButton(t("set.title"), Modifier.weight(1f), icon = R.drawable.ic_gear_six) { nav.go(Route.Settings) }
+        }
+    }
+}
+
+/** Orbot if it is installed, else its download page. */
+fun Context.openOrbot() {
+    val launch = packageManager.getLaunchIntentForPackage("org.torproject.android")
+    if (launch != null) runCatching { startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    else openLink("https://orbot.app/")
+}
+
+/** The Monero form: is Tor up right now? Checked every few seconds while the form is open. */
+@Composable
+private fun TorLive(nav: Nav) {
+    val p = LocalPalette.current
+    val s = Maze.settings.value
+    var up by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            up = MoneroSync.torReachable(Maze.settings.value)
+            kotlinx.coroutines.delay(3_000)
+        }
+    }
+    when (up) {
+        false -> TorRequired(nav)
+        else -> Glass(Modifier.fillMaxWidth(), tint = if (up == true) p.up else p.accent) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Ic(R.drawable.ic_shield_check, tint = if (up == true) p.up else p.accent, size = 18.dp)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(if (up == true) t("m.xmr.tor_ok", "host" to s.torHost, "port" to s.torPort.toString()) else t("m.xmr.tor_t"),
+                        style = Type.strong, color = p.text)
+                    Text(t("m.xmr.tor_b", "host" to s.torHost, "port" to s.torPort.toString()), style = Type.bodySmall,
+                        color = p.textMid, modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+        }
     }
 }

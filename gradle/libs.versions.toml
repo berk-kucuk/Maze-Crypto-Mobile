@@ -8,6 +8,7 @@ composeBom = "2026.06.00"
 coroutines = "1.10.2"
 junit = "4.13.2"
 json = "20240303"
+bouncycastle = "1.79"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -24,6 +25,9 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 # org.json ships with Android; unit tests on the JVM need the real thing.
 json = { group = "org.json", name = "json", version.ref = "json" }
+
+# secp256k1 (HD accounts), Ed25519 field arithmetic (Monero view-only scanning), RIPEMD-160.
+bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
