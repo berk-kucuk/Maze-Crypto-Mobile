@@ -59,6 +59,42 @@ object Chains {
         // Spot, perp margin and staked HYPE on HyperCore plus HYPE on HyperEVM, as one balance.
         ChainInfo("hyperliquid", "Hyperliquid", Coin("hyperliquid", "HYPE", "Hyperliquid"), 18,
             "https://app.hyperliquid.xyz/explorer/address/{a}", "https://app.hyperliquid.xyz/explorer/tx/{t}", activity = true),
+        ChainInfo("ripple", "XRP Ledger", Coin("ripple", "XRP", "XRP"), 6,
+            "https://livenet.xrpl.org/accounts/{a}", "https://livenet.xrpl.org/transactions/{t}", activity = true),
+        ChainInfo("dogecoin", "Dogecoin", Coin("dogecoin", "DOGE", "Dogecoin"), 8,
+            "https://blockchair.com/dogecoin/address/{a}", "https://blockchair.com/dogecoin/transaction/{t}"),
+        ChainInfo("bitcoin-cash", "Bitcoin Cash", Coin("bitcoin-cash", "BCH", "Bitcoin Cash"), 8,
+            "https://blockchair.com/bitcoin-cash/address/{a}", "https://blockchair.com/bitcoin-cash/transaction/{t}"),
+        ChainInfo("cardano", "Cardano", Coin("cardano", "ADA", "Cardano"), 6,
+            "https://cardanoscan.io/address/{a}", "https://cardanoscan.io/transaction/{t}"),
+        ChainInfo("ton", "TON", Coin("the-open-network", "TON", "Toncoin"), 9,
+            "https://tonviewer.com/{a}", "https://tonviewer.com/transaction/{t}"),
+        ChainInfo("stellar", "Stellar", Coin("stellar", "XLM", "Stellar"), 7,
+            "https://stellar.expert/explorer/public/account/{a}", "https://stellar.expert/explorer/public/tx/{t}"),
+        ChainInfo("polkadot", "Polkadot", Coin("polkadot", "DOT", "Polkadot"), 10,
+            "https://assethub-polkadot.subscan.io/account/{a}", "https://assethub-polkadot.subscan.io/extrinsic/{t}"),
+        ChainInfo("cosmos", "Cosmos Hub", Coin("cosmos", "ATOM", "Cosmos Hub"), 6,
+            "https://www.mintscan.io/cosmos/address/{a}", "https://www.mintscan.io/cosmos/tx/{t}"),
+        ChainInfo("near", "NEAR", Coin("near", "NEAR", "NEAR Protocol"), 24, "https://nearblocks.io/address/{a}", "https://nearblocks.io/txns/{t}"),
+        ChainInfo("algorand", "Algorand", Coin("algorand", "ALGO", "Algorand"), 6, "https://allo.info/account/{a}", "https://allo.info/tx/{t}"),
+        ChainInfo("tezos", "Tezos", Coin("tezos", "XTZ", "Tezos"), 6, "https://tzkt.io/{a}", "https://tzkt.io/{t}"),
+        ChainInfo("kaspa", "Kaspa", Coin("kaspa", "KAS", "Kaspa"), 8,
+            "https://explorer.kaspa.org/addresses/{a}", "https://explorer.kaspa.org/txs/{t}"),
+        ChainInfo("dash", "Dash", Coin("dash", "DASH", "Dash"), 8,
+            "https://insight.dash.org/insight/address/{a}", "https://insight.dash.org/insight/tx/{t}"),
+        ChainInfo("zcash", "Zcash (transparent)", Coin("zcash", "ZEC", "Zcash"), 8,
+            "https://blockchair.com/zcash/address/{a}", "https://blockchair.com/zcash/transaction/{t}"),
+        ChainInfo("linea", "Linea", ETH, 18, "https://lineascan.build/address/{a}", "https://lineascan.build/tx/{t}"),
+        ChainInfo("zksync", "zkSync Era", ETH, 18, "https://era.zksync.network/address/{a}", "https://era.zksync.network/tx/{t}"),
+        ChainInfo("scroll", "Scroll", ETH, 18, "https://scrollscan.com/address/{a}", "https://scrollscan.com/tx/{t}"),
+        ChainInfo("mantle", "Mantle", Coin("mantle", "MNT", "Mantle"), 18, "https://mantlescan.xyz/address/{a}", "https://mantlescan.xyz/tx/{t}"),
+        ChainInfo("gnosis", "Gnosis", Coin("xdai", "XDAI", "xDAI"), 18, "https://gnosisscan.io/address/{a}", "https://gnosisscan.io/tx/{t}"),
+        ChainInfo("sonic", "Sonic", Coin("sonic-3", "S", "Sonic"), 18, "https://sonicscan.org/address/{a}", "https://sonicscan.org/tx/{t}"),
+        ChainInfo("cronos", "Cronos", Coin("crypto-com-chain", "CRO", "Cronos"), 18,
+            "https://explorer.cronos.org/address/{a}", "https://explorer.cronos.org/tx/{t}"),
+        ChainInfo("celo", "Celo", Coin("celo", "CELO", "Celo"), 18, "https://celoscan.io/address/{a}", "https://celoscan.io/tx/{t}"),
+        ChainInfo("ethereum-classic", "Ethereum Classic", Coin("ethereum-classic", "ETC", "Ethereum Classic"), 18,
+            "https://etc.blockscout.com/address/{a}", "https://etc.blockscout.com/tx/{t}"),
         // Monero balances cannot be read from an address — that is the point of Monero. A view-only
         // wallet (address + private view key) is scanned on the phone over Tor; otherwise the user enters it.
         ChainInfo("monero", "Monero", Coin("monero", "XMR", "Monero"), 12, explorerTx = "https://xmrchain.net/tx/{t}",
@@ -183,11 +219,31 @@ class WalletService(private val http: Http, private val cache: Cache) {
             if (e is CancellationException) throw e
             rpcBalance(w)       // the indexer is down or throttled: native + known tokens from a node
         }
-        "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche" -> rpcBalance(w)
+        in EVM_RPC -> rpcBalance(w)
         "solana" -> solanaBalance(w)
         "tron" -> tronBalance(w)
         "hyperliquid" -> hyperliquidBalance(w)
-        else -> throw NotSupported(w.chain)
+        else -> {
+            val coin = native(w)
+            val amount = when (w.chain) {
+                "ripple" -> xrpBalance(w)
+                "dogecoin" -> dogeBalance(w)
+                "dash" -> dashBalance(w)
+                "bitcoin-cash" -> bchBalance(w)
+                "zcash" -> blockchair("zcash", w.address)
+                "cardano" -> cardanoBalance(w)
+                "ton" -> tonBalance(w)
+                "stellar" -> stellarBalance(w)
+                "polkadot" -> dotBalance(w)
+                "cosmos" -> cosmosBalance(w)
+                "near" -> nearBalance(w)
+                "algorand" -> units(http.getObject("$ALGOD/accounts/${w.address}", mapOf("exclude" to "all")).opt("amount") ?: 0, 6)
+                "tezos" -> units(http.getJson("$TZKT/accounts/${w.address}/balance"), 6)
+                "kaspa" -> units(http.getObject("$KASPA/addresses/${w.address}/balance").opt("balance") ?: 0, 8)
+                else -> throw NotSupported(w.chain)
+            }
+            WalletBalance(listOf(Asset(coin.id, coin.symbol, coin.name, amount)), System.currentTimeMillis())
+        }
     }
 
     private suspend fun fetchActivity(w: Wallet): List<Transfer> = if (w.account) accountActivity(w) else when (w.chain) {
@@ -196,6 +252,7 @@ class WalletService(private val http: Http, private val cache: Cache) {
         "solana" -> solanaActivity(w)
         "tron" -> tronActivity(w)
         "hyperliquid" -> hyperliquidActivity(w)
+        "ripple" -> xrpActivity(w)
         else -> emptyList()
     }
 
@@ -739,6 +796,149 @@ class WalletService(private val http: Http, private val cache: Cache) {
         return out.values.sortedByDescending { it.ts }
     }
 
+    // ── Networks read as one native balance ───────────────────────────────────
+
+    private suspend fun xrpl(method: String, params: JSONObject): JSONObject = firstOk(XRPL_RPC) { url ->
+        val o = http.postJson(url, JSONObject().put("method", method).put("params", JSONArray().put(params))) as? JSONObject
+            ?: throw ValidationError("xrpl: expected object")
+        val r = o.getJSONObject("result")
+        if (r.optString("status") == "error" && r.optString("error") != "actNotFound") throw NetError("xrpl: ${r.optString("error").take(60)}")
+        r
+    }
+
+    private suspend fun xrpBalance(w: Wallet): Double {
+        val r = xrpl("account_info", JSONObject().put("account", w.address).put("ledger_index", "validated"))
+        if (r.optString("error") == "actNotFound") return 0.0       // never funded
+        return units(r.getJSONObject("account_data").opt("Balance"), 6)
+    }
+
+    private suspend fun xrpActivity(w: Wallet): List<Transfer> {
+        val coin = native(w)
+        val r = xrpl("account_tx", JSONObject().put("account", w.address).put("limit", 30).put("ledger_index_min", -1))
+        return (r.optJSONArray("transactions")?.objects() ?: emptyList()).mapNotNull { e ->
+            runCatching {
+                val tx = e.optJSONObject("tx") ?: e.optJSONObject("tx_json") ?: return@runCatching null
+                val meta = e.optJSONObject("meta") ?: JSONObject()
+                if (tx.optString("TransactionType") != "Payment") return@runCatching null
+                val delivered = meta.opt("delivered_amount") ?: tx.opt("Amount")
+                if (delivered !is String) return@runCatching null        // an issued token, not XRP
+                val amount = units(delivered, 6)
+                val from = tx.optString("Account")
+                val to = tx.optString("Destination")
+                val sign = when { from == w.address && to != w.address -> -1.0; to == w.address && from != w.address -> 1.0; else -> return@runCatching null }
+                if (amount <= 0) return@runCatching null
+                val ok = meta.optString("TransactionResult", "tesSUCCESS") == "tesSUCCESS"
+                val date = tx.optLong("date")
+                Transfer(
+                    w.chain, (tx.optString("hash").ifEmpty { e.optString("hash") }).take(80), if (date > 0) date + RIPPLE_EPOCH else 0L,
+                    if (ok) "ok" else "failed", if (ok) listOf(Leg(coin.id, coin.symbol, sign * amount)) else emptyList(),
+                    fee = if (sign < 0) units(tx.optString("Fee", "0"), 6) else null, feeSymbol = coin.symbol,
+                    counterparty = if (sign < 0) to else from,
+                )
+            }.getOrNull()
+        }
+    }
+
+    private suspend fun dogeBalance(w: Wallet): Double = firstOk(listOf(BLOCKCYPHER, BLOCKCHAIR)) { base ->
+        if (base == BLOCKCYPHER) units(http.getObject("$BLOCKCYPHER/doge/main/addrs/${w.address}/balance").opt("final_balance"), 8)
+        else blockchair("dogecoin", w.address)
+    }
+
+    private suspend fun dashBalance(w: Wallet): Double = firstOk(listOf(DASH_INSIGHT, BLOCKCYPHER)) { base ->
+        if (base == DASH_INSIGHT) {
+            val o = http.getObject("$DASH_INSIGHT/addr/${w.address}", mapOf("noTxList" to 1))
+            units(BigInteger(o.get("balanceSat").toString()) + BigInteger(o.optString("unconfirmedBalanceSat", "0").ifEmpty { "0" }), 8)
+        } else units(http.getObject("$BLOCKCYPHER/dash/main/addrs/${w.address}/balance").opt("final_balance"), 8)
+    }
+
+    private suspend fun bchBalance(w: Wallet): Double {
+        val a = Address.bitcoinCashAddress(w.address)
+        return firstOk(listOf(HASKOIN_BCH, BLOCKCHAIR)) { base ->
+            if (base == HASKOIN_BCH) {
+                val o = http.getObject("$HASKOIN_BCH/address/$a/balance")
+                units(BigInteger(o.get("confirmed").toString()) + BigInteger(o.optString("unconfirmed", "0").ifEmpty { "0" }), 8)
+            } else blockchair("bitcoin-cash", a)
+        }
+    }
+
+    private suspend fun blockchair(chainName: String, a: String): Double {
+        val data = http.getObject("$BLOCKCHAIR/$chainName/dashboards/address/$a", mapOf("limit" to 0)).getJSONObject("data")
+        val entry = data.optJSONObject(a) ?: data.optJSONObject(data.keys().next()) ?: throw ValidationError("blockchair: no entry")
+        return units(entry.getJSONObject("address").opt("balance") ?: 0, 8)
+    }
+
+    private suspend fun cardanoBalance(w: Wallet): Double {
+        val arr = http.postJson("$KOIOS/address_info", JSONObject().put("_addresses", JSONArray().put(w.address))) as? JSONArray
+            ?: throw ValidationError("koios: expected array")
+        return arr.optJSONObject(0)?.let { units(it.opt("balance") ?: "0", 6) } ?: 0.0
+    }
+
+    private suspend fun tonBalance(w: Wallet): Double = firstOk(TON_API) { base ->
+        if ("toncenter" in base) {
+            val o = http.getObject("$base/getAddressBalance", mapOf("address" to w.address))
+            if (!o.optBoolean("ok")) throw NetError("toncenter: not ok")
+            units(o.opt("result"), 9)
+        } else units(http.getObject("$base/accounts/${w.address}").opt("balance"), 9)
+    }
+
+    private suspend fun stellarBalance(w: Wallet): Double {
+        val o = try {
+            http.getObject("$HORIZON/accounts/${w.address}")
+        } catch (e: HttpError) {
+            if (e.code == 404) return 0.0      // not funded yet
+            throw e
+        }
+        val native = o.optJSONArray("balances")?.objects()?.firstOrNull { it.optString("asset_type") == "native" } ?: return 0.0
+        return BigDecimal(native.getString("balance")).toDouble()
+    }
+
+    private suspend fun dotBalance(w: Wallet): Double {
+        val pub = Address.ss58PublicKey(w.address) ?: throw ValidationError("polkadot address")
+        val hex = { b: ByteArray -> b.joinToString("") { "%02x".format(it) } }
+        val key = "0x$DOT_ACCOUNT_PREFIX${hex(Address.blake2b128(pub))}${hex(pub)}"
+        val call: suspend (String) -> Double = { url ->
+            val body = JSONObject().put("jsonrpc", "2.0").put("id", 1).put("method", "state_getStorage").put("params", JSONArray().put(key))
+            val o = http.postJson(url, body) as? JSONObject ?: throw ValidationError("polkadot: expected object")
+            if (o.has("error")) throw NetError("polkadot: rpc error")
+            val raw = o.optString("result").takeIf { it.startsWith("0x") }
+            if (raw == null) 0.0      // no account on this chain
+            else {
+                val d = raw.substring(2).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                if (d.size < 48) throw ValidationError("polkadot: account record")
+                fun le(from: Int) = BigInteger(1, d.copyOfRange(from, from + 16).reversedArray())
+                units(le(16) + le(32), 10)       // free + reserved
+            }
+        }
+        var total = firstOk(DOT_ASSET_HUB, call)
+        // DOT moved to Asset Hub in 2025; what is left on the relay chain is added when it answers.
+        runCatching { total += firstOk(DOT_RELAY, call) }.onFailure { if (it is CancellationException) throw it }
+        return total
+    }
+
+    private suspend fun cosmosBalance(w: Wallet): Double = firstOk(COSMOS_REST) { base ->
+        var n = BigDecimal.ZERO
+        http.getObject("$base/cosmos/bank/v1beta1/balances/${w.address}").optJSONArray("balances")?.objects()
+            ?.filter { it.optString("denom") == "uatom" }?.forEach { n += BigDecimal(it.getString("amount")) }
+        http.getObject("$base/cosmos/staking/v1beta1/delegations/${w.address}").optJSONArray("delegation_responses")?.objects()
+            ?.mapNotNull { it.optJSONObject("balance") }?.filter { it.optString("denom") == "uatom" }
+            ?.forEach { n += BigDecimal(it.getString("amount")) }
+        units(n.toBigInteger().toString(), 6)
+    }
+
+    private suspend fun nearBalance(w: Wallet): Double = firstOk(NEAR_RPC) { url ->
+        val params = JSONObject().put("request_type", "view_account").put("finality", "final").put("account_id", w.address)
+        val o = http.postJson(url, JSONObject().put("jsonrpc", "2.0").put("id", 1).put("method", "query").put("params", params)) as? JSONObject
+            ?: throw ValidationError("near: expected object")
+        val err = o.optJSONObject("error")
+        if (err != null) {
+            val cause = err.optJSONObject("cause")?.optString("name").orEmpty()
+            if (cause == "UNKNOWN_ACCOUNT") 0.0 else throw NetError("near: ${cause.take(40)}")
+        } else {
+            val r = o.getJSONObject("result")
+            units(BigInteger(r.getString("amount")) + BigInteger(r.optString("locked", "0").ifEmpty { "0" }), 24)
+        }
+    }
+
     /**
      * Whether a token priced only by an indexer may count. Airdropped meme tokens
      * often carry a "price" from one thin pool; billions of them would make the
@@ -870,14 +1070,45 @@ class WalletService(private val http: Http, private val cache: Cache) {
             "polygon" to listOf("https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org"),
             "bsc" to listOf("https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org", "https://bsc.drpc.org"),
             "avalanche" to listOf("https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc", "https://avalanche.drpc.org"),
+            "linea" to listOf("https://linea-rpc.publicnode.com", "https://rpc.linea.build"),
+            "zksync" to listOf("https://mainnet.era.zksync.io", "https://zksync.drpc.org"),
+            "scroll" to listOf("https://scroll-rpc.publicnode.com", "https://rpc.scroll.io"),
+            "mantle" to listOf("https://mantle-rpc.publicnode.com", "https://rpc.mantle.xyz"),
+            "gnosis" to listOf("https://gnosis-rpc.publicnode.com", "https://rpc.gnosischain.com"),
+            "sonic" to listOf("https://sonic-rpc.publicnode.com", "https://rpc.soniclabs.com"),
+            "cronos" to listOf("https://cronos-evm-rpc.publicnode.com", "https://evm.cronos.org"),
+            "celo" to listOf("https://celo-rpc.publicnode.com", "https://forno.celo.org"),
+            "ethereum-classic" to listOf("https://etc.etcdesktop.com", "https://ethereum-classic.drpc.org"),
         )
-        private val EVM_CHAIN_ID = mapOf("ethereum" to 1L, "base" to 8453L, "arbitrum" to 42161L, "optimism" to 10L, "polygon" to 137L, "bsc" to 56L, "avalanche" to 43114L)
+        private val EVM_CHAIN_ID = mapOf(
+            "ethereum" to 1L, "base" to 8453L, "arbitrum" to 42161L, "optimism" to 10L, "polygon" to 137L, "bsc" to 56L, "avalanche" to 43114L,
+            "linea" to 59144L, "zksync" to 324L, "scroll" to 534352L, "mantle" to 5000L, "gnosis" to 100L, "sonic" to 146L,
+            "cronos" to 25L, "celo" to 42220L, "ethereum-classic" to 61L,
+        )
         private val SOLANA_RPC = listOf("https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com")
         private val SPL_PROGRAMS = listOf("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
         private const val JUPITER = "https://lite-api.jup.ag"
         private const val TRONGRID = "https://api.trongrid.io"
         private const val HL_INFO = "https://api.hyperliquid.xyz/info"
         private const val HYPER_EVM = "https://rpc.hyperliquid.xyz/evm"
+        private val XRPL_RPC = listOf("https://xrplcluster.com", "https://s2.ripple.com:51234", "https://xrpl.ws")
+        private const val RIPPLE_EPOCH = 946684800L
+        private const val BLOCKCYPHER = "https://api.blockcypher.com/v1"
+        private const val BLOCKCHAIR = "https://api.blockchair.com"
+        private const val HASKOIN_BCH = "https://api.blockchain.info/haskoin-store/bch"
+        private const val DASH_INSIGHT = "https://insight.dash.org/insight-api"
+        private const val KOIOS = "https://api.koios.rest/api/v1"
+        private val TON_API = listOf("https://toncenter.com/api/v2", "https://tonapi.io/v2")
+        private const val HORIZON = "https://horizon.stellar.org"
+        private val DOT_ASSET_HUB = listOf("https://polkadot-asset-hub-rpc.polkadot.io", "https://asset-hub-polkadot-rpc.n.dwellir.com")
+        private val DOT_RELAY = listOf("https://rpc.polkadot.io", "https://polkadot-rpc.publicnode.com")
+        /** twox128("System") ‖ twox128("Account"): the storage map of account balances. */
+        private const val DOT_ACCOUNT_PREFIX = "26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da9"
+        private val COSMOS_REST = listOf("https://cosmos-rest.publicnode.com", "https://rest.cosmos.directory/cosmoshub")
+        private val NEAR_RPC = listOf("https://rpc.mainnet.near.org", "https://free.rpc.fastnear.com")
+        private const val ALGOD = "https://mainnet-api.algonode.cloud/v2"
+        private const val TZKT = "https://api.tzkt.io/v1"
+        private const val KASPA = "https://api.kaspa.org"
         /** Hyperliquid spot tokens that stand for a coin (Unit-bridged BTC/ETH/SOL, USDT0). */
         private val HL_SPOT = mapOf(
             "HYPE" to Coin("hyperliquid", "HYPE", "Hyperliquid"), "USDC" to Coin("usd-coin", "USDC", "USDC"),
@@ -897,6 +1128,19 @@ class WalletService(private val http: Http, private val cache: Cache) {
             "avalanche-c-chain-rpc.publicnode.com" to 0.2, "api.avax.network" to 0.3, "avalanche.drpc.org" to 0.3,
             "api.mainnet-beta.solana.com" to 0.35, "solana-rpc.publicnode.com" to 0.35, "lite-api.jup.ag" to 1.0,
             "api.trongrid.io" to 0.5, "api.hyperliquid.xyz" to 0.3, "rpc.hyperliquid.xyz" to 0.3,
+            "xrplcluster.com" to 0.3, "s2.ripple.com" to 0.3, "xrpl.ws" to 0.3,
+            "api.blockcypher.com" to 0.5, "api.blockchair.com" to 2.0, "api.blockchain.info" to 0.5, "insight.dash.org" to 0.5,
+            "api.koios.rest" to 1.0, "toncenter.com" to 1.1, "tonapi.io" to 1.0, "horizon.stellar.org" to 0.3,
+            "polkadot-asset-hub-rpc.polkadot.io" to 0.3, "asset-hub-polkadot-rpc.n.dwellir.com" to 0.3,
+            "rpc.polkadot.io" to 0.3, "polkadot-rpc.publicnode.com" to 0.3,
+            "cosmos-rest.publicnode.com" to 0.3, "rest.cosmos.directory" to 0.5,
+            "rpc.mainnet.near.org" to 0.3, "free.rpc.fastnear.com" to 0.3,
+            "mainnet-api.algonode.cloud" to 0.3, "api.tzkt.io" to 0.3, "api.kaspa.org" to 0.5,
+            "linea-rpc.publicnode.com" to 0.2, "rpc.linea.build" to 0.3, "mainnet.era.zksync.io" to 0.3, "zksync.drpc.org" to 0.3,
+            "scroll-rpc.publicnode.com" to 0.2, "rpc.scroll.io" to 0.3, "mantle-rpc.publicnode.com" to 0.2, "rpc.mantle.xyz" to 0.3,
+            "gnosis-rpc.publicnode.com" to 0.2, "rpc.gnosischain.com" to 0.3, "sonic-rpc.publicnode.com" to 0.2, "rpc.soniclabs.com" to 0.3,
+            "cronos-evm-rpc.publicnode.com" to 0.2, "evm.cronos.org" to 0.3, "celo-rpc.publicnode.com" to 0.2, "forno.celo.org" to 0.3,
+            "etc.etcdesktop.com" to 0.3, "ethereum-classic.drpc.org" to 0.3,
         )
     }
 }

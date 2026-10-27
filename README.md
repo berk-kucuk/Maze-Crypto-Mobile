@@ -107,8 +107,12 @@ Basic mode by default, expert mode in Settings — as on the desktop.
 - **Wallets** (Portfolio → Wallets, and "Your wallets" on a coin's chart) —
   watch any number of public addresses per coin. Bitcoin, Litecoin, Ethereum
   (+ Base, Arbitrum, Optimism, Polygon), Hyperliquid (spot, perp margin, staked
-  HYPE and HyperEVM), Solana and TRON are read from the blockchain — balances,
-  known tokens (USDT, USDC, …) and recent transfers; Monero and anything else
+  HYPE and HyperEVM), Solana, TRON and XRP are read from the blockchain —
+  balances, known tokens (USDT, USDC, …) and recent transfers. Balances are also
+  read on Dogecoin, Bitcoin Cash, Cardano, TON, Stellar, Polkadot, Cosmos Hub,
+  NEAR (`name.near`), Algorand, Tezos, Kaspa, Dash, Zcash (transparent), BNB
+  Chain, Avalanche, Linea, zkSync Era, Scroll, Mantle, Gnosis, Sonic, Cronos,
+  Celo and Ethereum Classic; Monero and anything else
   (an exchange account, say) take a balance you enter. Wallet amounts become
   the portfolio's amounts; recorded trades still give the average cost and
   profit/loss, and a coin without recorded buys shows "cost unknown" rather
@@ -141,7 +145,9 @@ backups (addresses reveal holdings and history to whoever reads the backup).
 Watching a wallet sends its address to the public explorer for that chain
 (Blockstream / mempool.space, litecoinspace, Blockscout, public RPC nodes —
 publicnode, 1rpc, drpc and the networks' own — Solana RPC + Jupiter, TronGrid,
-Hyperliquid's API; each tried in turn until one answers). An explorer can link
+Hyperliquid's API, XRPL servers, BlockCypher, Haskoin, Blockchair, Koios,
+toncenter / tonapi, Horizon, Polkadot RPC, Cosmos REST, NEAR RPC, AlgoNode,
+TzKT, api.kaspa.org; each tried in turn until one answers). An explorer can link
 the address to your IP: use the proxy to keep it out.
 
 Permissions: Internet, notifications (asked for when you turn alerts on) and

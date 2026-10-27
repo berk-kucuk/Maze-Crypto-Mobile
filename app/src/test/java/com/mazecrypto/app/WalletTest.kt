@@ -31,8 +31,8 @@ class WalletTest {
     @Test fun bitcoin() {
         assertEquals(listOf("bitcoin"), ok("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh").chains)
         assertEquals(listOf("bitcoin"), ok("BC1QXY2KGDYGJRSQTZQ2N0YRF2493P83KKFJHX0WLH").chains)    // QR codes are upper case
-        assertEquals(listOf("bitcoin"), ok("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").chains)
-        assertEquals(listOf("bitcoin", "litecoin"), ok("3KMmeqPeQcngyTehdfSwsGqvxfU7J7qtc8").chains)
+        assertEquals(listOf("bitcoin", "bitcoin-cash"), ok("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").chains)
+        assertEquals(listOf("bitcoin", "litecoin", "bitcoin-cash"), ok("3KMmeqPeQcngyTehdfSwsGqvxfU7J7qtc8").chains)
         // Taproot (bech32m, BIP-350 vector).
         assertEquals(listOf("bitcoin"), ok("bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0").chains)
         assertEquals("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", ok("bitcoin:bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh?amount=0.1").address)
@@ -51,6 +51,34 @@ class WalletTest {
         assertEquals(Address.Result.Bad("checksum"), Address.parse("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD"))
         assertEquals(ok("ethereum:0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@1/transfer?value=1").address, "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
         assertEquals(Address.key("ethereum", "0xABCDEF0000000000000000000000000000000000"), Address.key("ethereum", "0xabcdef0000000000000000000000000000000000"))
+    }
+
+    @Test fun moreNetworks() {
+        assertEquals(listOf("ripple"), ok("rMidom2o9Nv9DsyQQmHv9KhSibK282sn15").chains)
+        assertEquals(Address.Result.Bad("checksum"), Address.parse("rMidom2o9Nv9DsyQQmHv9KhSibK282sn16"))
+        assertEquals(listOf("dogecoin"), ok("DH5yaieqoZN36fDVciNyRueRGvGLR3mr7L").chains)
+        assertEquals(listOf("dash"), ok("XpESxaUmonkq8RaLLp46Brx2K39ggQe226").chains)
+        assertEquals(listOf("zcash"), ok("t1HsdDMzmJfq4vc7T17XYjEkLMLvbgM1fCi").chains)
+        val bch = "bitcoincash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a"
+        assertEquals(listOf("bitcoin-cash"), ok(bch).chains)
+        assertEquals(bch, ok(bch.substringAfter(':')).address)
+        assertEquals(bch, Address.bitcoinCashAddress("1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggu"))
+        assertEquals(Address.Result.Bad("checksum"), Address.parse(bch.dropLast(1) + "b"))
+        assertEquals(listOf("kaspa"), ok("kaspa:qqkqkzjvr7zwxxmjxjkmxxdwju9kjs6e9u82uh59z07vgaks6gg62v8707g73").chains)
+        assertEquals(listOf("cardano"), ok("addr1qxy3w62dupy9pzmpdfzxz4k240w5vawyagl5m9djqquyymrtm3grn7gpnjh7rwh2dy62hk8639lt6kzn32yxq960usnq9pexvt").chains)
+        assertEquals(listOf("cosmos"), ok("cosmos1fl48vsnmsdzcv85q5d2q4z5ajdha8yu34mf0eh").chains)
+        assertEquals(listOf("near"), ok("alice.near").chains)
+        assertEquals(listOf("tezos"), ok("tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb").chains)
+        assertEquals(listOf("stellar"), ok("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7").chains)
+        assertEquals(listOf("algorand"), ok("737777777777777777777777777777777777777777777777777UFEJ2CI").chains)
+        assertEquals(listOf("ton"), ok("EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N").chains)
+        assertEquals(Address.Result.Bad("checksum"), Address.parse("EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2M"))
+        assertEquals(listOf("polkadot"), ok("15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5").chains)
+        assertTrue("ethereum-classic" in ok("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed").chains)
+        // Their secrets are refused.
+        assertEquals(Address.Result.Secret("private_key"), Address.parse("snoPBrXtMeMyMHUVTgbuqAfg1SUTb"))
+        assertEquals(Address.Result.Secret("private_key"), Address.parse("SBGWSG6BTNCKCOB3DIFBGCVMUPQFYPA2G4O34RMTB343OYPXU5DJDVMN"))
+        assertEquals(Address.Result.Secret("private_key"), Address.parse("ed25519:3D4YudUahN1nawWogh8pAKSj92sUNMdbZGjn7kERKzYoTy8tnFQuwoGUC51DowKqorvkr2pytJSnwuSbsNVfqygr"))
     }
 
     @Test fun otherChains() {

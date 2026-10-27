@@ -1,5 +1,7 @@
 package com.mazecrypto.app.core
 
+import org.bouncycastle.crypto.digests.Blake2bDigest
+import org.bouncycastle.crypto.digests.SHA512tDigest
 import java.math.BigInteger
 import java.security.MessageDigest
 
@@ -30,9 +32,26 @@ object Address {
     }
 
     /** Networks that use Ethereum-style 0x addresses; Hyperliquid (HyperCore + HyperEVM) included. */
-    val EVM_CHAINS = listOf("ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "hyperliquid")
+    val EVM_CHAINS = listOf(
+        "ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "hyperliquid",
+        "linea", "zksync", "scroll", "mantle", "gnosis", "sonic", "cronos", "celo", "ethereum-classic",
+    )
 
-    private val SCHEMES = setOf("bitcoin", "litecoin", "ethereum", "solana", "tron", "monero")
+    private val SCHEMES = setOf(
+        "bitcoin", "litecoin", "ethereum", "solana", "tron", "monero", "dogecoin", "dash", "zcash", "ripple", "xrpl", "xrp",
+        "cardano", "web+cardano", "ton", "stellar", "web+stellar", "polkadot", "cosmos", "near", "algorand", "tezos",
+    )
+    /** Exported private keys of other chains, by their textual prefix. */
+    private val SECRET_PREFIX = listOf(
+        "ed25519:", "secp256k1:",                                          // NEAR
+        "ed25519_sk", "ed25519e_sk", "addr_xsk", "acct_xsk", "root_xsk",   // Cardano
+        "edsk", "spsk", "p2sk",                                            // Tezos
+        "suiprivkey",
+    )
+    private val NEAR = Regex("^(?=.{2,64}$)([a-z0-9]+[-_])*[a-z0-9]+(\\.([a-z0-9]+[-_])*[a-z0-9]+)*\\.(near|tg)$")
+    private val TON_RAW = Regex("^(0|-1):[0-9a-fA-F]{64}$")
+    private const val B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    private val TEZOS_PREFIX = setOf("06a19f", "06a1a1", "06a1a4", "06a1a6", "025a79")   // tz1 tz2 tz3 tz4 KT1
     private val HEX40 = Regex("^0x[0-9a-fA-F]{40}$")
     private val HEX64 = Regex("^(0x)?[0-9a-fA-F]{64}$")
     private val WORD = Regex("^[a-zA-Z]{2,12}$")
@@ -58,6 +77,12 @@ object Address {
         if (HEX64.matches(s)) return "private_key"
         val lower = s.lowercase()
         if (listOf("xprv", "yprv", "zprv", "tprv", "uprv", "vprv", "ltpv", "ttpv").any { lower.startsWith(it) }) return "xprv"
+        if (SECRET_PREFIX.any { lower.startsWith(it) }) return "private_key"
+        if (s.length == 56 && s[0] == 'S' && strkey(s, 18 shl 3) != null) return "private_key"   // a Stellar secret seed
+        if (s.startsWith("s") && s.length in 25..35) {
+            val x = Base58.decodeOrNull(s, Base58.XRP_ALPHABET)
+            if (x != null && x.size == 21 && x[0] == 0x21.toByte() && Base58.checksumOk(x)) return "private_key"   // XRP family seed
+        }
         if (s.startsWith("[") && s.endsWith("]")) {
             // A Solana keypair exported as a JSON byte array.
             val n = s.trim('[', ']').split(',').mapNotNull { it.trim().toIntOrNull() }
@@ -65,9 +90,9 @@ object Address {
         }
         val b = Base58.decodeOrNull(s)
         if (b != null) {
-            // WIF private keys (Bitcoin 0x80, Litecoin 0xB0, testnet 0xEF), with a valid checksum.
+            // WIF private keys (Bitcoin 0x80, Litecoin 0xB0, Dogecoin 0x9E, Dash 0xCC, testnet 0xEF).
             if ((b.size == 37 || b.size == 38) && Base58.checksumOk(b) &&
-                (b[0] == 0x80.toByte() || b[0] == 0xB0.toByte() || b[0] == 0xEF.toByte())) return "private_key"
+                (b[0].toInt() and 0xff) in setOf(0x80, 0xB0, 0x9E, 0xCC, 0xEF)) return "private_key"
             // A Solana secret key (64 bytes: seed + public key).
             if (b.size == 64) return "private_key"
         }
@@ -109,25 +134,172 @@ object Address {
             return if (moneroOk(s)) Result.Ok(s, listOf("monero")) else Result.Bad("checksum")
         }
 
+        otherChains(s, lower)?.let { return it }
+
         val b = Base58.decodeOrNull(s) ?: return Result.Bad("unknown")
         if (b.size == 25) {
             if (!Base58.checksumOk(b)) return Result.Bad("checksum")
             return when (b[0].toInt() and 0xff) {
-                0x00 -> Result.Ok(s, listOf("bitcoin"))
-                0x05 -> Result.Ok(s, listOf("bitcoin", "litecoin"))    // P2SH "3…": used by both
+                0x00 -> Result.Ok(s, listOf("bitcoin", "bitcoin-cash"))                // legacy "1…": Bitcoin Cash still accepts it
+                0x05 -> Result.Ok(s, listOf("bitcoin", "litecoin", "bitcoin-cash"))    // P2SH "3…": used by all three
                 0x30, 0x32 -> Result.Ok(s, listOf("litecoin"))
                 0x41 -> Result.Ok(s, listOf("tron"))
-                0x6f, 0xc4, 0x3a -> Result.Bad("testnet")
+                0x1e, 0x16 -> Result.Ok(s, listOf("dogecoin"))
+                0x4c, 0x10 -> Result.Ok(s, listOf("dash"))
+                0x6f, 0xc4, 0x3a, 0x71, 0x8c -> Result.Bad("testnet")
                 else -> Result.Bad("unknown")
             }
+        }
+        // Zcash transparent t1… / t3….
+        if (b.size == 26 && b[0] == 0x1c.toByte() && (b[1] == 0xb8.toByte() || b[1] == 0xbd.toByte())) {
+            return if (Base58.checksumOk(b)) Result.Ok(s, listOf("zcash")) else Result.Bad("checksum")
+        }
+        // Polkadot SS58, network prefix 0 ("1…").
+        if (b.size == 35 && b[0] == 0.toByte() && s.length in 47..48) {
+            return if (ss58Ok(b)) Result.Ok(s, listOf("polkadot")) else Result.Bad("checksum")
         }
         if (b.size == 32 && s.length in 32..44) return Result.Ok(s, listOf("solana"))
         return Result.Bad("unknown")
     }
 
+    /** Formats with their own prefix or alphabet; null when [s] is none of them. */
+    private fun otherChains(s: String, lower: String): Result? {
+        // XRP Ledger: "r…" in Ripple's own base58 alphabet, Base58Check otherwise.
+        if (s[0] == 'r' && s.length in 25..35 && s.all { it in Base58.XRP_ALPHABET }) {
+            val x = Base58.decodeOrNull(s, Base58.XRP_ALPHABET)
+            if (x != null && x.size == 25 && x[0] == 0.toByte()) {
+                return if (Base58.checksumOk(x)) Result.Ok(s, listOf("ripple")) else Result.Bad("checksum")
+            }
+        }
+        if (lower.startsWith("bitcoincash:") || (s.length == 42 && lower[0] in "qp" && (s == lower || s == s.uppercase()))) {
+            val a = if (lower.startsWith("bitcoincash:")) lower else "bitcoincash:$lower"
+            if (s != lower && s != s.uppercase()) return Result.Bad("checksum")
+            return if (CashAddr.ok(a)) Result.Ok(a, listOf("bitcoin-cash")) else if (':' in s) Result.Bad("checksum") else null
+        }
+        if (lower.startsWith("kaspatest:")) return Result.Bad("testnet")
+        if (lower.startsWith("kaspa:")) {
+            return if (s == lower && CashAddr.ok(lower)) Result.Ok(lower, listOf("kaspa")) else Result.Bad("checksum")
+        }
+        if (lower.startsWith("addr_test1") || lower.startsWith("stake_test1")) return Result.Bad("testnet")
+        if (lower.startsWith("addr1")) {
+            val d = Bech32.decode(s, "addr", 200)
+            return if (d != null && d.size >= 29) Result.Ok(lower, listOf("cardano")) else Result.Bad("checksum")
+        }
+        if (lower.startsWith("cosmos1")) {
+            val d = Bech32.decode(s, "cosmos")
+            return if (d != null && (d.size == 20 || d.size == 32)) Result.Ok(lower, listOf("cosmos")) else Result.Bad("checksum")
+        }
+        if (NEAR.matches(s)) return Result.Ok(s, listOf("near"))
+        if (listOf("tz1", "tz2", "tz3", "tz4", "kt1").any { lower.startsWith(it) } && s.length == 36) {
+            val x = Base58.decodeOrNull(s)
+            if (x == null || x.size != 27 || !Base58.checksumOk(x)) return Result.Bad("checksum")
+            val prefix = x.copyOfRange(0, 3).joinToString("") { "%02x".format(it) }
+            return if (prefix in TEZOS_PREFIX) Result.Ok(s, listOf("tezos")) else Result.Bad("unknown")
+        }
+        if (s.length == 56 && s[0] == 'G' && s.all { it in B32 }) {
+            return if (strkey(s, 6 shl 3) != null) Result.Ok(s, listOf("stellar")) else Result.Bad("checksum")
+        }
+        if (s.length == 58 && s.all { it in B32 }) {
+            return if (algorandOk(s)) Result.Ok(s, listOf("algorand")) else Result.Bad("checksum")
+        }
+        if (TON_RAW.matches(s)) return Result.Ok(lower, listOf("ton"))
+        if (s.length == 48 && s.take(2) in setOf("EQ", "UQ", "Ef", "Uf", "kQ", "0Q", "kf", "0f")) {
+            val flag = tonFlag(s) ?: return Result.Bad("checksum")
+            return if (flag and 0x80 != 0) Result.Bad("testnet") else Result.Ok(s, listOf("ton"))
+        }
+        return null
+    }
+
+    /** A Bitcoin Cash address as its explorers want it: cashaddr, also for a legacy 1…/3… address. */
+    fun bitcoinCashAddress(address: String): String {
+        if (address.startsWith("bitcoincash:")) return address
+        val b = Base58.decodeOrNull(address) ?: return address
+        if (b.size != 25) return address
+        val version = when (b[0].toInt() and 0xff) { 0x00 -> 0; 0x05 -> 8; else -> return address }
+        return CashAddr.encode("bitcoincash", version, b.copyOfRange(1, 21))
+    }
+
     /** The same address in a form that compares equal however it was typed. */
-    fun key(chain: String, address: String): String =
-        if (chain in EVM_CHAINS || address.startsWith("bc1") || address.startsWith("ltc1")) "$chain:${address.lowercase()}" else "$chain:$address"
+    fun key(chain: String, address: String): String = when {
+        chain == "bitcoin-cash" -> "$chain:${bitcoinCashAddress(address)}"
+        chain in EVM_CHAINS || chain == "ton" || address.startsWith("bc1") || address.startsWith("ltc1") -> "$chain:${address.lowercase()}"
+        else -> "$chain:$address"
+    }
+
+    // ── Polkadot SS58 / Stellar / Algorand / TON ─────────────────────────────
+
+    private fun blake2b(data: ByteArray, size: Int): ByteArray {
+        val d = Blake2bDigest(size * 8)
+        d.update(data, 0, data.size)
+        return ByteArray(size).also { d.doFinal(it, 0) }
+    }
+
+    /** BLAKE2b with a 16-byte digest, as Substrate's storage keys use it. */
+    fun blake2b128(data: ByteArray): ByteArray = blake2b(data, 16)
+
+    /** One-byte network prefix + 32-byte key + 2 bytes of BLAKE2b-512("SS58PRE" ‖ data). */
+    fun ss58Ok(b: ByteArray): Boolean = b.size == 35 &&
+        blake2b("SS58PRE".toByteArray() + b.copyOfRange(0, 33), 64).copyOfRange(0, 2).contentEquals(b.copyOfRange(33, 35))
+
+    fun ss58PublicKey(address: String): ByteArray? {
+        val b = Base58.decodeOrNull(address) ?: return null
+        return if (ss58Ok(b)) b.copyOfRange(1, 33) else null
+    }
+
+    private fun crc16Xmodem(data: ByteArray): Int {
+        var crc = 0
+        for (byte in data) {
+            crc = crc xor ((byte.toInt() and 0xff) shl 8)
+            repeat(8) { crc = if (crc and 0x8000 != 0) (crc shl 1) xor 0x1021 else crc shl 1; crc = crc and 0xffff }
+        }
+        return crc
+    }
+
+    private fun b32decode(s: String): ByteArray? {
+        var acc = 0
+        var bits = 0
+        val out = java.io.ByteArrayOutputStream()
+        for (c in s) {
+            val d = B32.indexOf(c)
+            if (d < 0) return null
+            acc = ((acc shl 5) or d) and 0xffff
+            bits += 5
+            if (bits >= 8) {
+                bits -= 8
+                out.write((acc shr bits) and 0xff)
+            }
+        }
+        return out.toByteArray()
+    }
+
+    /** A Stellar key (G… account, S… seed): version byte, 32 bytes, CRC16-XModem little-endian. */
+    private fun strkey(s: String, version: Int): ByteArray? {
+        val b = b32decode(s) ?: return null
+        if (b.size != 35 || (b[0].toInt() and 0xff) != version) return null
+        val crc = crc16Xmodem(b.copyOfRange(0, 33))
+        val ok = (b[33].toInt() and 0xff) == (crc and 0xff) && (b[34].toInt() and 0xff) == (crc shr 8)
+        return if (ok) b.copyOfRange(1, 33) else null
+    }
+
+    private fun algorandOk(s: String): Boolean {
+        val b = b32decode(s) ?: return false
+        if (b.size != 36) return false
+        val d = SHA512tDigest(256)
+        d.update(b, 0, 32)
+        val h = ByteArray(32).also { d.doFinal(it, 0) }
+        return h.copyOfRange(28, 32).contentEquals(b.copyOfRange(32, 36))
+    }
+
+    /** The flag byte of a user-friendly TON address (bounceable 0x11 / 0x51, +0x80 testnet), if valid. */
+    private fun tonFlag(s: String): Int? {
+        val b = runCatching { java.util.Base64.getUrlDecoder().decode(s.replace('+', '-').replace('/', '_')) }.getOrNull() ?: return null
+        if (b.size != 36) return null
+        val flag = b[0].toInt() and 0xff
+        if ((flag and 0x7f) != 0x11 && (flag and 0x7f) != 0x51) return null
+        if (b[1] != 0.toByte() && b[1] != 0xff.toByte()) return null
+        val crc = crc16Xmodem(b.copyOfRange(0, 34))
+        return if ((b[34].toInt() and 0xff) == (crc shr 8) && (b[35].toInt() and 0xff) == (crc and 0xff)) flag else null
+    }
 
     /** First and last characters: enough to recognise, short enough for a row. */
     fun short(address: String, head: Int = 6, tail: Int = 4): String =
@@ -173,18 +345,21 @@ object Address {
 
 object Base58 {
     const val ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    const val XRP_ALPHABET = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz"
     private val INDEX = IntArray(128) { -1 }.also { a -> ALPHABET.forEachIndexed { i, c -> a[c.code] = i } }
+    private val XRP_INDEX = IntArray(128) { -1 }.also { a -> XRP_ALPHABET.forEachIndexed { i, c -> a[c.code] = i } }
     private val B58 = BigInteger.valueOf(58)
 
-    fun decodeOrNull(s: String): ByteArray? {
+    fun decodeOrNull(s: String, alphabet: String = ALPHABET): ByteArray? {
         if (s.isEmpty() || s.length > 120) return null
+        val index = if (alphabet == XRP_ALPHABET) XRP_INDEX else INDEX
         var n = BigInteger.ZERO
         for (c in s) {
-            val d = if (c.code < 128) INDEX[c.code] else -1
+            val d = if (c.code < 128) index[c.code] else -1
             if (d < 0) return null
             n = n.multiply(B58).add(BigInteger.valueOf(d.toLong()))
         }
-        val zeros = s.takeWhile { it == '1' }.length
+        val zeros = s.takeWhile { it == alphabet[0] }.length
         val body = n.toByteArray().let { if (it.isNotEmpty() && it[0] == 0.toByte()) it.copyOfRange(1, it.size) else it }
         val bytes = if (n.signum() == 0) ByteArray(0) else body
         return ByteArray(zeros) + bytes
@@ -306,6 +481,18 @@ object Bech32 {
         return hrp + "1" + (data + chk).joinToString("") { CHARSET[it].toString() }
     }
 
+    /** The data of a plain bech32 address (Cardano, Cosmos), or null if the checksum fails. */
+    fun decode(addr: String, hrp: String, maxLen: Int = 90): ByteArray? {
+        if (addr != addr.lowercase() && addr != addr.uppercase()) return null
+        val a = addr.lowercase()
+        val pos = a.lastIndexOf('1')
+        if (pos < 0 || a.substring(0, pos) != hrp || a.length > maxLen || a.length - pos - 1 < 6) return null
+        val data = a.substring(pos + 1).map { CHARSET.indexOf(it) }
+        if (data.any { it < 0 }) return null
+        if (polymod(expand(hrp) + data.toIntArray()) != 1) return null
+        return CashAddr.convertBits(data.dropLast(6), 5, 8, false).map { it.toByte() }.toByteArray()
+    }
+
     /** A lowercase segwit address for [hrp]: right checksum flavour, witness version and program length. */
     fun segwitOk(addr: String, hrp: String): Boolean {
         if (addr.length > 90) return false
@@ -385,6 +572,58 @@ object Keccak {
         }
         val out = ByteArray(32)
         for (i in 0 until 32) out[i] = (state[i / 8] ushr (8 * (i % 8))).toByte()
+        return out
+    }
+}
+
+/** cashaddr: Bitcoin Cash and Kaspa (`prefix:payload`, 40-bit BCH checksum). */
+object CashAddr {
+    private const val CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+    private fun polymod(values: List<Int>): Long {
+        var c = 1L
+        for (d in values) {
+            val c0 = (c ushr 35).toInt()
+            c = ((c and 0x07ffffffffL) shl 5) xor d.toLong()
+            if (c0 and 0x01 != 0) c = c xor 0x98f2bc8e61L
+            if (c0 and 0x02 != 0) c = c xor 0x79b76d99e2L
+            if (c0 and 0x04 != 0) c = c xor 0xf33e5fb3c4L
+            if (c0 and 0x08 != 0) c = c xor 0xae2eabe2a8L
+            if (c0 and 0x10 != 0) c = c xor 0x1e4f43e470L
+        }
+        return c xor 1L
+    }
+
+    /** A lowercase `prefix:payload` address with a valid checksum. */
+    fun ok(addr: String): Boolean {
+        val colon = addr.indexOf(':')
+        if (colon <= 0 || addr.length - colon - 1 < 9) return false
+        val data = addr.substring(colon + 1).map { CHARSET.indexOf(it) }
+        if (data.any { it < 0 }) return false
+        return polymod(addr.substring(0, colon).map { it.code and 31 } + 0 + data) == 0L
+    }
+
+    fun encode(prefix: String, version: Int, payload: ByteArray): String {
+        val data = convertBits((byteArrayOf(version.toByte()) + payload).map { it.toInt() and 0xff }, 8, 5, true)
+        val chk = polymod(prefix.map { it.code and 31 } + 0 + data + List(8) { 0 })
+        val all = data + (0 until 8).map { ((chk shr (5 * (7 - it))) and 31).toInt() }
+        return prefix + ":" + all.joinToString("") { CHARSET[it].toString() }
+    }
+
+    fun convertBits(data: List<Int>, from: Int, to: Int, pad: Boolean): List<Int> {
+        var acc = 0
+        var bits = 0
+        val out = mutableListOf<Int>()
+        val mask = (1 shl to) - 1
+        for (v in data) {
+            acc = ((acc shl from) or v) and 0xfffff
+            bits += from
+            while (bits >= to) {
+                bits -= to
+                out += (acc shr bits) and mask
+            }
+        }
+        if (pad && bits > 0) out += (acc shl (to - bits)) and mask
         return out
     }
 }
