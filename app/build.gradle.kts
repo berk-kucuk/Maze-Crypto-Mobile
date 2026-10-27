@@ -30,8 +30,8 @@ android {
         minSdk = 26
         targetSdk = 37
         // Must never go backwards or repeat.
-        versionCode = 13
-        versionName = "0.8.0"
+        versionCode = 14
+        versionName = "0.8.1"
     }
 
     signingConfigs {

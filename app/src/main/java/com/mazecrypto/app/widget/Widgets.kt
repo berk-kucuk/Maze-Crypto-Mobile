@@ -837,13 +837,17 @@ abstract class MazeWidget : AppWidgetProvider() {
         val age = System.currentTimeMillis() - (WidgetData.load(context)?.ts ?: 0L)
         if (Maze.settings.value.backgroundMinutes == 0 || age < STALE_FOR_TIMER_MS) return
         val pending = goAsync()
+        // The refresh is not tied to the broadcast: it goes on (and redraws) however long the network takes.
+        val refresh = Maze.scope.launch {
+            withTimeoutOrNull(REFRESH_LIMIT_MS) {
+                com.mazecrypto.app.work.BackgroundLog.run(context, "widget") { Maze.refresh(background = true) }
+            }
+            Widgets.updateAll(context)
+        }
         Maze.scope.launch {
+            // While the app is in front its broadcasts must finish within 10 s, or Android reports it as frozen.
             try {
-                // A broadcast gets well under a minute; a slow network must not hold it past that.
-                withTimeoutOrNull(25_000) {
-                    com.mazecrypto.app.work.BackgroundLog.run(context, "widget") { Maze.refresh(background = true) }
-                }
-                Widgets.updateAll(context)
+                withTimeoutOrNull(BROADCAST_WAIT_MS) { refresh.join() }
             } finally {
                 pending.finish()
             }
@@ -866,6 +870,9 @@ abstract class MazeWidget : AppWidgetProvider() {
 
 /** Older than this when the widget timer fires: refresh. Younger: the job already did. */
 private const val STALE_FOR_TIMER_MS = 10 * 60 * 1000L
+/** How long the widget broadcast is held open for the refresh (foreground limit: 10 s). */
+private const val BROADCAST_WAIT_MS = 8_000L
+private const val REFRESH_LIMIT_MS = 60_000L
 
 class FavoritesWidget : MazeWidget()
 
